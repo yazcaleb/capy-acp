@@ -1,0 +1,48 @@
+{
+  "name": "capy-acp",
+  "version": "0.1.0",
+  "description": "Runs Capy coding-agent threads on your machine from Agent Client Protocol (ACP) clients, such as T3 Code.",
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "capy",
+    "coding-agent",
+    "t3-code"
+  ],
+  "homepage": "https://github.com/yazcaleb/capy-acp#readme",
+  "bugs": "https://github.com/yazcaleb/capy-acp/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yazcaleb/capy-acp.git"
+  },
+  "license": "MIT",
+  "author": "Yaz Caleb",
+  "type": "module",
+  "bin": {
+    "capy-acp": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "pnpm run build",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.9.1",
+    "effect": "4.1.5"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.5",
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}

@@ -1,0 +1,77 @@
+event: status
+data: {"threadId":"jam_01M8421GEQRSR8NGTKWE8Q1EJK","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: status
+data: {"threadId":"jam_01M8421GEQRSR8NGTKWE8Q1EJK","status":"working"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":"I"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":"’ll"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" run"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" the"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" command"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" and"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" wait"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" for"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" its"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":" output"}
+
+event: assistant
+data: {"callId":"call_829c91a4df164a9b972ab554f497625a","text":"."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M8424P79Q1VHRHG229WCNC98
+event: transcript
+data: {"id":"01M8424P79Q1VHRHG229WCNC98","source":"user","text":"Run the shell command `sleep 90; echo finished` and wait for it, then reply with its output. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:19:59.025Z"}
+
+id: 01M8424XYMYS6MYCNP813EXK01
+event: transcript
+data: {"id":"01M8424XYMYS6MYCNP813EXK01","source":"assistant","text":"I’ll run the command and wait for its output.","model":"openai/gpt-6.2-astra","callId":"call_829c91a4df164a9b972ab554f497625a","createdAt":"2026-11-23T11:20:06.368Z"}
+
+event: tool_call
+data: {"callId":"call_f3baab97d2cf426ca9c542226473f3fa","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: status
+data: {"threadId":"jam_01M8421GEQRSR8NGTKWE8Q1EJK","status":"waiting"}
+
+event: run
+data: {"phase":"end"}
+
+id: 01M84254GNMG69BYRZWNZ8VNY0
+event: transcript
+data: {"id":"call_f3baab97d2cf426ca9c542226473f3fa","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":1684}],"text":"","createdAt":"2026-11-23T11:20:13.079Z"}
+
+event: done
+data: {}
+

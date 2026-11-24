@@ -1,0 +1,311 @@
+event: status
+data: {"threadId":"jam_01M8421GEQRSR8NGTKWE8Q1EJK","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: status
+data: {"threadId":"jam_01M8421GEQRSR8NGTKWE8Q1EJK","status":"working"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":"I"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":"’ll"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" check"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" the"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" directory"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" before"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" editing"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" either"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":" file"}
+
+event: assistant
+data: {"callId":"call_db79dde34f604fc5add97b0524ecd9f8","text":"."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M8421GJNXZ2JSJX7EN045596
+event: transcript
+data: {"id":"01M8421GJNXZ2JSJX7EN045596","source":"user","text":"Spike test for an editor integration. First run pwd. If the current directory is /home/dev/Repos/demo-repo, stop immediately and reply only WRONG_DIR. Otherwise: read README.md. Then make a small two-file edit: create docs/SPIKE.md with a one-sentence summary of what this repository is, and append the line '<!-- capy-acp spike -->' at the end of README.md. Then run git status --short and git diff --stat. Reply in at most three sentences. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:18:14.395Z"}
+
+id: 01M8421PG540X8RAARVCCJM4E6
+event: transcript
+data: {"id":"01M8421PG540X8RAARVCCJM4E6","source":"assistant","text":"I’ll check the directory before editing either file.","model":"openai/gpt-6.2-astra","callId":"call_db79dde34f604fc5add97b0524ecd9f8","createdAt":"2026-11-23T11:18:20.427Z"}
+
+event: tool_call
+data: {"callId":"call_93e3e32619b04e09bce2bea66df037a5","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M8421YVFESGAZKMHXVNE8N2H
+event: transcript
+data: {"id":"call_93e3e32619b04e09bce2bea66df037a5","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":1653}],"text":"","createdAt":"2026-11-23T11:18:28.977Z"}
+
+event: tool_call
+data: {"callId":"call_6bd57b201b2c4f3cb004323d657ea184","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M84226SWCPPC9NSBMEDECKRS
+event: transcript
+data: {"id":"call_6bd57b201b2c4f3cb004323d657ea184","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":1736}],"text":"","createdAt":"2026-11-23T11:18:37.117Z"}
+
+event: tool_call
+data: {"callId":"call_7cb2b292acfa49148cbbd5461b90900c","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M8422BSPQR7XBFR23VTBMWG1
+event: transcript
+data: {"id":"call_7cb2b292acfa49148cbbd5461b90900c","source":"tool","tool":"execute","calls":[{"tool":"apply_patch","durationMs":243},{"tool":"bash","durationMs":362}],"text":"","createdAt":"2026-11-23T11:18:42.232Z"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"Created"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"docs"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"/S"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"PI"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"KE"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":".md"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" with"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" a"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" one"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"-s"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"entence"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" repository"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" summary"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" and"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" appended"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"<!--"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" cap"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"y"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"-ac"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"p"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" spike"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" -->"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" to"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"README"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":".md"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`."}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"git"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" status"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" --"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"short"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" showed"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" M"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" README"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":".md"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" and"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"??"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" docs"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"/"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`;"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" `"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"git"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" diff"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" --"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"stat"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"`"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" reported"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" one"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" README"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" insertion"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" because"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" the"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" new"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" file"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" is"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":" un"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"tracked"}
+
+event: assistant
+data: {"callId":"call_bf07483c61db42daa79f254fcd1cbdea","text":"."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: status
+data: {"threadId":"jam_01M8421GEQRSR8NGTKWE8Q1EJK","status":"idle"}
+
+event: run
+data: {"phase":"end"}
+
+id: 01M8422KE4RNTPFPPSQGDZFCE4
+event: transcript
+data: {"id":"01M8422KE4RNTPFPPSQGDZFCE4","source":"assistant","text":"Created `docs/SPIKE.md` with a one-sentence repository summary and appended `<!-- capy-acp spike -->` to `README.md`. `git status --short` showed ` M README.md` and `?? docs/`; `git diff --stat` reported one README insertion because the new file is untracked.","model":"openai/gpt-6.2-astra","callId":"call_bf07483c61db42daa79f254fcd1cbdea","createdAt":"2026-11-23T11:18:50.058Z"}
+
+event: done
+data: {}
+

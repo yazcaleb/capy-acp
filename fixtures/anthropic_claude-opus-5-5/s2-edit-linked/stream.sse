@@ -1,0 +1,135 @@
+event: status
+data: {"threadId":"jam_01M84K0H48AGHJBZY5KBC247Q8","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: status
+data: {"threadId":"jam_01M84K0H48AGHJBZY5KBC247Q8","status":"working"}
+
+event: turn
+data: {"phase":"end","outcome":"aborted"}
+
+event: run
+data: {"phase":"end"}
+
+event: run
+data: {"phase":"start"}
+
+event: turn
+data: {"phase":"start"}
+
+event: tool_call
+data: {"callId":"toolu_01M8fKkR8rZ2qtgzh1FfeVmP","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M84K0HA45PN2H6STSA7EK03A
+event: transcript
+data: {"id":"01M84K0HA45PN2H6STSA7EK03A","source":"user","text":"Spike test for an editor integration. First run pwd. Read README.md. Then make a small two-file edit: create docs/SPIKE.md with a one-sentence summary of what this repository is, and append the line '<!-- capy-acp spike -->' at the end of README.md. Then run git status --short and git diff --stat. Reply in at most three sentences. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T16:14:48.181Z"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M84K0WJ6RXKCY07086P44R8Q
+event: transcript
+data: {"id":"toolu_01M8fKkR8rZ2qtgzh1FfeVmP","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":1574}],"text":"","createdAt":"2026-11-23T16:14:59.656Z"}
+
+event: tool_call
+data: {"callId":"toolu_01JZ33svkQQAZhLy79TczVdj","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M84K10HCV0A4KJWW98MGPT1H
+event: transcript
+data: {"id":"toolu_01JZ33svkQQAZhLy79TczVdj","source":"tool","tool":"execute","calls":[{"tool":"write","durationMs":1177},{"tool":"bash","durationMs":289}],"text":"","createdAt":"2026-11-23T16:15:03.725Z"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"I ran `pw"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"d` ("}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"`/home/dev/"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"capy-acp-spike"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"/sandbox`)"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" and read README.md, then created"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" `docs/SPIK"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"E.md` with"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" a one-sentence summary"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" and appended `<!--"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" capy-acp spike -"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"->` to the end of README."}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"md. `git status --short`"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" shows "}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"` M README.md` and `"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"?? docs/`."}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" `git diff --stat`"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" shows only `README.md |"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" 1 +` because the new"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" file is unt"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":"racked, and nothing was"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" committed or"}
+
+event: assistant
+data: {"callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","text":" pushed."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M84K1387Y1TJ8T28YK4YAHMT
+event: transcript
+data: {"id":"01M84K1387Y1TJ8T28YK4YAHMT","source":"assistant","text":"I ran `pwd` (`/home/dev/capy-acp-spike/sandbox`) and read README.md, then created `docs/SPIKE.md` with a one-sentence summary and appended `<!-- capy-acp spike -->` to the end of README.md. `git status --short` shows ` M README.md` and `?? docs/`. `git diff --stat` shows only `README.md | 1 +` because the new file is untracked, and nothing was committed or pushed.","model":"anthropic/claude-opus-5-5","callId":"toolu_019D5dFvXaxjQjvyafdCB6PP","createdAt":"2026-11-23T16:15:06.520Z"}
+
+event: status
+data: {"threadId":"jam_01M84K0H48AGHJBZY5KBC247Q8","status":"idle"}
+
+event: done
+data: {}
+

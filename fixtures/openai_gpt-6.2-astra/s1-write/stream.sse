@@ -1,0 +1,104 @@
+event: status
+data: {"threadId":"jam_01M8420XH047DVP5YX26V9YXZ8","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: status
+data: {"threadId":"jam_01M8420XH047DVP5YX26V9YXZ8","status":"working"}
+
+event: tool_call
+data: {"callId":"call_d2dad21c5ad2475fba94c34aeb6df2e5","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M8420XP506ZGD68R247QR22Z
+event: transcript
+data: {"id":"01M8420XP506ZGD68R247QR22Z","source":"user","text":"Spike test, keep it tiny. First run pwd. If the current directory is /home/dev/Repos/demo-repo, stop immediately and reply only WRONG_DIR. Otherwise create a file SPIKE.txt containing the line 'hello from capy-acp', then run git status --short, then reply with one short sentence. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:17:55.058Z"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M84219Y3882WGZP6M9YX40Q5
+event: transcript
+data: {"id":"call_d2dad21c5ad2475fba94c34aeb6df2e5","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":1487},{"tool":"apply_patch","durationMs":942},{"tool":"bash","durationMs":688}],"text":"","createdAt":"2026-11-23T11:18:07.557Z"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"Created"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" `"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"SPI"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"KE"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":".txt"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"`;"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" `"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"git"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" status"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" --"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"short"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"`"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" reports"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" `"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"??"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":" SPI"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"KE"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":".txt"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"`"}
+
+event: assistant
+data: {"callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","text":"."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: status
+data: {"threadId":"jam_01M8420XH047DVP5YX26V9YXZ8","status":"idle"}
+
+event: run
+data: {"phase":"end"}
+
+id: 01M8421DS1G30XA88VC4DWPHZM
+event: transcript
+data: {"id":"01M8421DS1G30XA88VC4DWPHZM","source":"assistant","text":"Created `SPIKE.txt`; `git status --short` reports `?? SPIKE.txt`.","model":"openai/gpt-6.2-astra","callId":"call_69505e9dd98245a1a8ec339dd6a9fe27","createdAt":"2026-11-23T11:18:11.500Z"}
+
+event: done
+data: {}
+

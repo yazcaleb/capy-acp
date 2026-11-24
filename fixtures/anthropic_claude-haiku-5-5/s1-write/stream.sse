@@ -1,0 +1,93 @@
+event: status
+data: {"threadId":"jam_01M841ZHP4NW5HMW602W9V25Q4","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: turn
+data: {"phase":"end","outcome":"aborted"}
+
+event: status
+data: {"threadId":"jam_01M841ZHP4NW5HMW602W9V25Q4","status":"working"}
+
+event: run
+data: {"phase":"end"}
+
+event: run
+data: {"phase":"start"}
+
+event: turn
+data: {"phase":"start"}
+
+event: tool_call
+data: {"callId":"toolu_01GQj4x51CjgFFYzW322kph8","name":"bash","text":"Checking current directory"}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M841ZHVGZ69B7QBFD2YKF9F4
+event: transcript
+data: {"id":"01M841ZHVGZ69B7QBFD2YKF9F4","source":"user","text":"Spike test, keep it tiny. First run pwd. If the current directory is /home/dev/Repos/demo-repo, stop immediately and reply only WRONG_DIR. Otherwise create a file SPIKE.txt containing the line 'hello from capy-acp', then run git status --short, then reply with one short sentence. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:17:10.186Z"}
+
+id: 01M8420136MRW3P8NM8E6PK562
+event: transcript
+data: {"id":"toolu_01GQj4x51CjgFFYzW322kph8","source":"tool","tool":"bash","text":"Checking current directory","createdAt":"2026-11-23T11:17:25.744Z"}
+
+event: turn
+data: {"phase":"start"}
+
+event: tool_call
+data: {"callId":"toolu_016kNH4jvqeR3thACHibaUKe","name":"bash","text":"Creating SPIKE.txt and checking git status"}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M84205ZKJ1Y58X1CXGFR1X8V
+event: transcript
+data: {"id":"toolu_016kNH4jvqeR3thACHibaUKe","source":"tool","tool":"bash","text":"Creating SPIKE.txt and checking git status","createdAt":"2026-11-23T11:17:30.746Z"}
+
+event: turn
+data: {"phase":"start"}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"Created SPIKE"}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":".txt in"}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":" the demo"}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"-rep"}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"o "}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"checkout; git "}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"status --short shows `?? "}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"SPIKE.txt`"}
+
+event: assistant
+data: {"callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","text":"."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: status
+data: {"threadId":"jam_01M841ZHP4NW5HMW602W9V25Q4","status":"idle"}
+
+id: 01M8420G1TJT2D20JGS0T10YT8
+event: transcript
+data: {"id":"01M8420G1TJT2D20JGS0T10YT8","source":"assistant","text":"Created SPIKE.txt in the demo-repo checkout; git status --short shows `?? SPIKE.txt`.","model":"anthropic/claude-haiku-5-5","callId":"toolu_01MXR6qfnKCfQaeVK1Bsbjnv","createdAt":"2026-11-23T11:17:41.057Z"}
+
+event: done
+data: {}
+

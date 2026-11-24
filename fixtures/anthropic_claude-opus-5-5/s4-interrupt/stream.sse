@@ -1,0 +1,270 @@
+event: status
+data: {"threadId":"jam_01M8421EANV55CZXFSDGN0YPRX","status":"working"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"A"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" git"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" commit is a un"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"it of me"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"aning. It"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" answ"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ers one question: what"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" changed here"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":", and why?"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" A"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" small commit answers that question cl"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"early, while a large one t"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ends to blur several"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" answers together"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" until"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" none"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" of them is easy to read."}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" Most of the case"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" for small"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" commits comes from"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" that one property"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":". They ke"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ep the"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" history"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" of a project leg"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ible to"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" the people who will"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" dep"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"end on it later, and"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" those people are usually your"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" te"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ammates or"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" a"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" future version of yourself."}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"\n\nStart with review. When a re"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"viewer opens a commit"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" that touches three"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" files to"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" make one co"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"herent change, they can hold"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" the whole th"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ing in their head."}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" They can see the intent, check"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" the ed"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ge cases, and not"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ice what"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"'s"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" missing. When"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" a commit tou"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ches th"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"irty files to r"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ename a variable, fix two"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" bugs, re"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"format a module,"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" and add a feature, the re"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"viewer's"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" attention gets sp"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"read thin. The r"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ename no"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ise hides the b"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ug fix, and the format"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ting hides the feature."}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" Reviews of"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" large chang"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"es t"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"end to get appro"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ved on"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" tr"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ust rather than underst"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"anding, because"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" care"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ful reading tak"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"es too long. Small commits"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" make"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" care"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ful reading c"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"heap, and c"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"heap care"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":"ful reading is how"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" mistakes get caught before"}
+
+event: assistant
+data: {"callId":"toolu_01JNFUHqjnBkeveFwUVb3TZ9","text":" they "}
+
+event: run
+data: {"phase":"start"}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: run
+data: {"phase":"end"}
+
+id: 01M84261EVPSNF2DH3RY0TZHP8
+event: transcript
+data: {"id":"01M84261EVPSNF2DH3RY0TZHP8","source":"user","text":"Without running any tools, write a 700-word plain-prose essay about why small git commits are useful. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:20:42.748Z"}
+
+event: status
+data: {"threadId":"jam_01M8421EANV55CZXFSDGN0YPRX","status":"idle"}
+
+event: run
+data: {"phase":"end"}
+

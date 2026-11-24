@@ -1,0 +1,104 @@
+event: status
+data: {"threadId":"jam_01M8420XEANEVYK3ST2YJ667BT","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: status
+data: {"threadId":"jam_01M8420XEANEVYK3ST2YJ667BT","status":"working"}
+
+event: turn
+data: {"phase":"end","outcome":"aborted"}
+
+event: run
+data: {"phase":"end"}
+
+event: run
+data: {"phase":"start"}
+
+event: turn
+data: {"phase":"start"}
+
+event: tool_call
+data: {"callId":"toolu_01DsABzEnYab8pCsaXJRepdN","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M8420XHF6886DECM13XXVVDJ
+event: transcript
+data: {"id":"01M8420XHF6886DECM13XXVVDJ","source":"user","text":"Spike test, keep it tiny. First run pwd. If the current directory is /home/dev/Repos/demo-repo, stop immediately and reply only WRONG_DIR. Otherwise create a file SPIKE.txt containing the line 'hello from capy-acp', then run git status --short, then reply with one short sentence. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:17:54.903Z"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M84218Z7038EJAZHAHYP7297
+event: transcript
+data: {"id":"toolu_01DsABzEnYab8pCsaXJRepdN","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":2814},{"tool":"bash","durationMs":366}],"text":"","createdAt":"2026-11-23T11:18:06.569Z"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"I created"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":" SPIKE.txt"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":" in the worktree at /"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"home/dev/.cap"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"y/worktrees/j"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"am_01M8420XE"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"ANE"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"VY"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"K3ST2Y"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"J667BT/demo-r"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"epo, `g"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"it status --short` shows only "}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"`?? SPIKE."}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"txt`, and I "}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"didn't commit or "}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"push any"}
+
+event: assistant
+data: {"callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","text":"thing."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M8421AZK7DR589Q1111YSXNX
+event: transcript
+data: {"id":"01M8421AZK7DR589Q1111YSXNX","source":"assistant","text":"I created SPIKE.txt in the worktree at /home/dev/.capy/worktrees/jam_01M8420XEANEVYK3ST2YJ667BT/demo-repo, `git status --short` shows only `?? SPIKE.txt`, and I didn't commit or push anything.","model":"anthropic/claude-opus-5-5","callId":"toolu_01WaYfruKNnTExfA6vK6MRpr","createdAt":"2026-11-23T11:18:08.635Z"}
+
+event: status
+data: {"threadId":"jam_01M8420XEANEVYK3ST2YJ667BT","status":"idle"}
+
+event: done
+data: {}
+

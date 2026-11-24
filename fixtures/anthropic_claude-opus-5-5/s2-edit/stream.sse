@@ -1,0 +1,189 @@
+event: status
+data: {"threadId":"jam_01M8421EANV55CZXFSDGN0YPRX","status":"idle"}
+
+retry: 2000
+
+event: turn
+data: {"phase":"start"}
+
+event: status
+data: {"threadId":"jam_01M8421EANV55CZXFSDGN0YPRX","status":"working"}
+
+event: turn
+data: {"phase":"end","outcome":"aborted"}
+
+event: run
+data: {"phase":"end"}
+
+event: run
+data: {"phase":"start"}
+
+event: turn
+data: {"phase":"start"}
+
+event: tool_call
+data: {"callId":"toolu_01NbsVMAcZse7ruC7VzM9hd7","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+id: 01M8421EDRKY8TD1AKESFN7B29
+event: transcript
+data: {"id":"01M8421EDRKY8TD1AKESFN7B29","source":"user","text":"Spike test for an editor integration. First run pwd. If the current directory is /home/dev/Repos/demo-repo, stop immediately and reply only WRONG_DIR. Otherwise: read README.md. Then make a small two-file edit: create docs/SPIKE.md with a one-sentence summary of what this repository is, and append the line '<!-- capy-acp spike -->' at the end of README.md. Then run git status --short and git diff --stat. Reply in at most three sentences. Do not commit, push, or open a pull request.","authorName":"Spike User","createdAt":"2026-11-23T11:18:12.185Z"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M8421N80PX7V3PCF7FSVAAVA
+event: transcript
+data: {"id":"toolu_01NbsVMAcZse7ruC7VzM9hd7","source":"tool","tool":"execute","calls":[{"tool":"bash","durationMs":1630}],"text":"","createdAt":"2026-11-23T11:18:19.138Z"}
+
+event: tool_call
+data: {"callId":"toolu_01V8EEqdLZFhdjfs1oGkcVsB","name":"execute","text":""}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: turn
+data: {"phase":"start"}
+
+id: 01M8421T3JW8ETRS51BZBX3WBN
+event: transcript
+data: {"id":"toolu_01V8EEqdLZFhdjfs1oGkcVsB","source":"tool","tool":"execute","calls":[{"tool":"write","durationMs":1209},{"tool":"bash","durationMs":347}],"text":"","createdAt":"2026-11-23T11:18:24.115Z"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"The working directory is"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":" the"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":" Capy worktree ("}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"`/home/dev/"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":".capy/worktrees"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"/jam_01M8421"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"EANV"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"55"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"C"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"ZX"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"F"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"SD"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"G"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"N0YP"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"RX/demo-repo`)"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":", not `/home/dev"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"/Repos/demo-re"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"po`, so I went ah"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"ead with t"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"he edit a"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"fter r"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"eading README.m"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"d. I created `docs/S"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"PIKE.md` "}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"with a one-sentence s"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"ummary and a"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"ppended `<!-- capy-"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"acp spike -->` "}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"as t"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"he last line of README.md. `"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"git status --short` shows `"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":" "}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"M README.md` and `??"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":" docs/`, and `"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"git diff --stat` s"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"hows `README.md | 1 "}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"+`. "}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"It doesn't list the n"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"ew file because it's untracked; "}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"nothing is committed or p"}
+
+event: assistant
+data: {"callId":"toolu_017jkANJaWkKgRS893Z6hKp4","text":"ushed."}
+
+event: turn
+data: {"phase":"end","outcome":"settled"}
+
+event: status
+data: {"threadId":"jam_01M8421EANV55CZXFSDGN0YPRX","status":"idle"}
+
+id: 01M8421X7GH09JTWGY01N956F2
+event: transcript
+data: {"id":"01M8421X7GH09JTWGY01N956F2","source":"assistant","text":"The working directory is the Capy worktree (`/home/dev/.capy/worktrees/jam_01M8421EANV55CZXFSDGN0YPRX/demo-repo`), not `/home/dev/Repos/demo-repo`, so I went ahead with the edit after reading README.md. I created `docs/SPIKE.md` with a one-sentence summary and appended `<!-- capy-acp spike -->` as the last line of README.md. `git status --short` shows ` M README.md` and `?? docs/`, and `git diff --stat` shows `README.md | 1 +`. It doesn't list the new file because it's untracked; nothing is committed or pushed.","model":"anthropic/claude-opus-5-5","callId":"toolu_017jkANJaWkKgRS893Z6hKp4","createdAt":"2026-11-23T11:18:27.319Z"}
+
+event: done
+data: {}
+
