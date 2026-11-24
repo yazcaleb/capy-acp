@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   check:
-    # Depot's hosted runners. Swap for `ubuntu-latest` if this repository isn't connected to Depot.
     runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
