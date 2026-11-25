@@ -178,8 +178,8 @@ describe("worktree tracker", () => {
     writeFileSync(join(thread, ".capy-managed.json"), "{}")
     const root = repo()
     const worktree = join(thread, "app")
-    execFileSync("git", ["clone", "-q", root, worktree], { stdio: "pipe" })
-    git(worktree, "config", "core.autocrlf", "false")
+    // Without CRLF conversion whatever the machine's git says, as in `repo()`.
+    execFileSync("git", ["clone", "-q", "-c", "core.autocrlf=false", root, worktree], { stdio: "pipe" })
     return { home, worktree }
   }
 

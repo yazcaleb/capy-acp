@@ -12,7 +12,7 @@ afterEach(() => {
 })
 
 const projects = [{ id: "project_TEST", name: "Acme", repos: [{ repoFullName: "acme/app" }] }]
-const base = { cwd: "/w/app", gitRoot: "/w/app", repos: ["acme/app"], projects, mode: "linked" as const, allowWorktreeFallback: false }
+const base = { cwd: "/w/app", gitRoot: "/w/app", repos: ["acme/app"], projects, mode: "linked" as const, allowWorktreeFallback: false, platform: "linux" as const }
 
 describe("resolveWorkspace", () => {
   it("runs a linked clone in place, sending Capy's own spelling of the root", () => {
