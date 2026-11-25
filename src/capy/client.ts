@@ -50,7 +50,15 @@ const Project = Schema.Struct({
 const Page = <S extends Schema.Top>(item: S) =>
   Schema.Struct({ items: Schema.Array(item), cursor: Schema.optionalKey(Schema.NullOr(Schema.String)) })
 
-export const Thread = Schema.Struct({ id: Schema.String, status: ThreadStatus })
+/** Credits are thousandths of a dollar (see `formatCredits`). */
+const Usage = Schema.Struct({
+  totalCredits: Schema.Number,
+  llmCredits: Schema.optionalKey(Schema.Number),
+  imageCredits: Schema.optionalKey(Schema.Number),
+  vmCredits: Schema.optionalKey(Schema.Number)
+})
+
+export const Thread = Schema.Struct({ id: Schema.String, status: ThreadStatus, usage: Schema.optionalKey(Usage) })
 export type Thread = typeof Thread.Type
 
 const Receipt = Schema.Struct({ id: Schema.String })

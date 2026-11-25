@@ -14,6 +14,7 @@ import { Cause, Deferred, Effect, Exit, type Layer, ManagedRuntime } from "effec
 import { CapyClient, type CapyError, describeError, type Model, layer as capyLayer } from "./capy/client.js"
 import { type ChangeTracker, makeChangeTracker, makeWorktreeTracker } from "./changes.js"
 import type { AdapterConfig } from "./config.js"
+import { fetchPrices, formatCredits, modelDescription, modelLabel, type Price } from "./pricing.js"
 import { promptParts } from "./prompt.js"
 import { API_KEY_AUTH, savedApiKey } from "./setup.js"
 import { makeSessionStore, type SessionRecord } from "./store.js"
@@ -44,15 +45,14 @@ interface SessionState extends Setup {
   /** Set by `session/close` while a prompt still runs; the prompt removes the session when it settles. */
   closed: boolean
   cancel: Deferred.Deferred<void> | undefined
+  /** The thread's `usage.totalCredits` after the last turn, to report what each turn added. */
+  credits: number | undefined
 }
 
 /** A Capy stream event id (a ULID), the only thing a stream cursor may be. */
 const EVENT_ID = /^[0-9A-HJKMNP-TV-Z]{26}$/
 
 const log = (message: string) => process.stderr.write(`[capy-acp] ${message}\n`)
-
-/** Models billed to Capy credits are labelled, since device threads otherwise cost nothing. */
-const modelLabel = (model: Model) => (model.route === "capy" ? `${model.name} (Capy credits)` : model.name)
 
 /** Capy's answer when a linked root is not (or no longer) linked to this device. */
 const isNotLinked = (error: CapyError) => error._tag === "CapyApiError" && /does not link a folder/i.test(error.message)
@@ -66,6 +66,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
   const sessions = new Map<string, SessionState>()
   const store = makeSessionStore(config.stateDir)
   let models: ReadonlyArray<Model> | undefined
+  let prices: Promise<ReadonlyMap<string, Price>> | undefined
 
   /** Saves the session → thread mapping. A failed write costs only resumability, so it is logged. */
   const persist = async (sessionId: string, session: SessionState) => {
@@ -103,12 +104,56 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
       return yield* f(yield* CapyClient)
     })
 
+  const loadPrices = () =>
+    (prices ??= config.pricingUrl === ""
+      ? Promise.resolve(new Map())
+      : fetchPrices(config.pricingUrl).catch((error: unknown) => {
+          log(`no model prices: ${error instanceof Error ? error.message : String(error)}`)
+          return new Map()
+        }))
+
   const loadModels = async (): Promise<ReadonlyArray<Model>> => {
-    if (models === undefined) models = await run(withCapy((capy) => capy.listModels))
+    if (models === undefined) {
+      void loadPrices()
+      models = await run(withCapy((capy) => capy.listModels))
+    }
     return models
   }
 
-  const configOptions = (session: SessionState, available: ReadonlyArray<Model>): Array<SessionConfigOption> => {
+  /**
+   * Shows what the turn added to the thread's Capy credits, as an ACP notice. Turns on a subscription
+   * add nothing and show nothing. Capy can book a turn's credits late; they then show after the next turn.
+   */
+  const reportCredits = async (session: SessionState, notify: (update: SessionUpdate) => Promise<unknown>) => {
+    const before = session.credits
+    const usage = await readCredits(session.threadId!)
+    if (usage === undefined) return
+    session.credits = usage.totalCredits
+    if (before === undefined || usage.totalCredits <= before) return
+    const parts = [
+      ["models", usage.llmCredits],
+      ["machines", usage.vmCredits],
+      ["images", usage.imageCredits]
+    ].flatMap(([name, credits]) => (typeof credits === "number" && credits > 0 ? [`${name} ${formatCredits(credits)}`] : []))
+    await notify({
+      sessionUpdate: "notice",
+      severity: "info",
+      title: `Capy credits: ${formatCredits(usage.totalCredits - before)}`,
+      description: `This thread has used ${formatCredits(usage.totalCredits)} of Capy credits${parts.length > 1 ? ` (${parts.join(", ")})` : ""}.`
+    })
+  }
+
+  /** The thread's credit total, or undefined when Capy does not answer. Never fails the prompt. */
+  const readCredits = async (threadId: string) => {
+    const exit = await runtime.runPromiseExit(withCapy((capy) => capy.getThread(threadId)))
+    return Exit.isSuccess(exit) ? exit.value.usage : undefined
+  }
+
+  const configOptions = (
+    session: SessionState,
+    available: ReadonlyArray<Model>,
+    priced: ReadonlyMap<string, Price>
+  ): Array<SessionConfigOption> => {
     const current = available.find((m) => m.id === session.model)
     const modes = current?.reasoningModes ?? []
     const options: Array<SessionConfigOption> = [
@@ -119,7 +164,10 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         type: "select",
         currentValue: session.model,
         options: (current === undefined ? [{ id: session.model, name: session.model } as Model, ...available] : available).map(
-          (m) => ({ value: m.id, name: modelLabel(m), ...(m.billing ? { description: `Billed to: ${m.billing}` } : {}) })
+          (m) => {
+            const description = modelDescription(m, priced.get(m.id))
+            return { value: m.id, name: modelLabel(m, priced.get(m.id)), ...(description === undefined ? {} : { description }) }
+          }
         )
       }
     ]
@@ -186,6 +234,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     // A thread works in the folder it was created for, so a saved session keeps its own folder.
     const folder = record?.cwd ?? cwd
     if (record !== undefined && record.cwd !== cwd) log(`session ${sessionId}: client opened ${cwd}; the thread works in ${record.cwd}`)
+    void loadPrices()
     const setup = await setUp(folder, () => sessions.get(sessionId)?.threadId)
     const available = await loadModels().catch(() => [] as ReadonlyArray<Model>)
     const session: SessionState = {
@@ -199,7 +248,8 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
       noteShown: record !== undefined,
       busy: false,
       closed: false,
-      cancel: undefined
+      cancel: undefined,
+      credits: undefined
     }
     sessions.set(sessionId, session)
     log(
@@ -207,7 +257,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         ? `session ${sessionId}: cannot run in ${folder}: ${setup.problem}`
         : `session ${sessionId}: ${setup.resolved.repo} in project ${setup.resolved.projectName} (${setup.resolved.workspace.kind})`
     )
-    return configOptions(session, available)
+    return configOptions(session, available, await loadPrices())
   }
 
   const app = acp
@@ -315,7 +365,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         throw acp.RequestError.invalidParams(undefined, `Unknown option ${params.configId}`)
       }
       await persist(params.sessionId, session)
-      return { configOptions: configOptions(session, available) }
+      return { configOptions: configOptions(session, available, await loadPrices()) }
     })
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessions.get(params.sessionId)
@@ -350,6 +400,9 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
           session.noteShown = true
           await say(`_${resolved.note}_\n\n`)
         }
+        // A new thread starts at 0 credits.
+        if (session.threadId === undefined) session.credits = 0
+        else if (session.credits === undefined) session.credits = (await readCredits(session.threadId))?.totalCredits
         const reasoningModes = (await loadModels().catch(() => [] as ReadonlyArray<Model>)).find((m) => m.id === session.model)?.reasoningModes ?? []
         const reasoningMode = effectiveReasoning(session.reasoning, reasoningModes)
         const exit = await runtime.runPromiseExit(
@@ -403,6 +456,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         session.cursor = result.cursor
         if (session.threadId !== undefined) session.title ??= titleOf(text || files.map((f) => f.name).join(", "))
         await persist(params.sessionId, session)
+        if (session.threadId !== undefined) await reportCredits(session, notify)
         if (session.threadId !== undefined) log(`session ${params.sessionId}: thread ${session.threadId} → ${result.stopReason}`)
         return { stopReason: result.stopReason }
       } finally {

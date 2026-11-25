@@ -9,6 +9,8 @@ export interface AdapterConfig {
   readonly apiUrl: string
   /** File holding the API key, used when `CAPY_API_KEY` is unset. Never logged. */
   readonly apiKeyFile: string
+  /** The docs page with the model price table; empty turns prices off. */
+  readonly pricingUrl: string
   readonly defaultModel: string
   readonly defaultReasoning: string
   /** `linked` edits the folder the client opened; `worktree` gives each session a fresh Capy worktree. */
@@ -47,6 +49,7 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): AdapterConfig 
   return {
     apiUrl: (env.CAPY_API_URL ?? "https://api.capy.ai/api/v1").replace(/\/+$/, ""),
     apiKeyFile: env.CAPY_API_KEY_FILE ?? join(home, ".config", "capy-acp", "api-key"),
+    pricingUrl: env.CAPY_ACP_PRICING_URL ?? "https://docs.capy.ai/models-and-pricing.md",
     defaultModel: env.CAPY_ACP_MODEL ?? "anthropic/claude-opus-5-5",
     defaultReasoning: env.CAPY_ACP_REASONING ?? "high",
     workspaceMode: env.CAPY_ACP_WORKSPACE === "worktree" ? "worktree" : "linked",

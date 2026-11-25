@@ -12,6 +12,7 @@ import { makeAgent } from "../src/agent.js"
 import { CapyApiError, CapyClient, CapyConfigError, type CreateThread, type SendMessage } from "../src/capy/client.js"
 import type { CapyEvent, Message } from "../src/capy/events.js"
 import { readConfig } from "../src/config.js"
+import { PRICE_TABLE } from "./fixtures.js"
 
 const dirs: Array<string> = []
 afterEach(() => {
@@ -35,6 +36,7 @@ const machine = (env: Record<string, string> = {}) => {
     CAPY_ACP_ATTACHMENTS_DIR: join(home, "attachments"),
     CAPY_DESKTOP_CONFIG_DIR: join(home, "nowhere"),
     CAPY_API_KEY_FILE: join(home, "api-key"),
+    CAPY_ACP_PRICING_URL: "",
     ...env
   })
   return { repo, config, home }
@@ -330,6 +332,52 @@ describe("agent sessions", () => {
     await expect(
       client.agent.request(acp.methods.agent.session.setConfigOption, { sessionId: opened.sessionId, configId: "reasoning", value: "max" })
     ).rejects.toThrow(/does not offer/)
+    await client.close()
+  })
+
+  it("prices models on Capy credits, and reports the credits that each turn used", async () => {
+    const { repo, config } = machine({ CAPY_ACP_PRICING_URL: `data:text/markdown,${encodeURIComponent(PRICE_TABLE)}` })
+    const log: Log = { creates: [], sends: [], streams: [] }
+    let credits = 0
+    const client = await connect(
+      config,
+      fakeCapy(log, [turn("01A", "one"), turn("01B", "two"), turn("01C", "three")], {
+        listModels: Effect.succeed([
+          { id: "anthropic/claude-opus-5-5", name: "Opus 5.5", route: "member_seat", billing: "Claude subscription" },
+          { id: "particle/particle-1", name: "Particle-1", route: "capy", billing: "Capy API" },
+          { id: "thinkingmachines/inkling-2-small", name: "Inkling 2 Small", route: "capy", billing: "Capy API" }
+        ]),
+        getThread: (id) =>
+          Effect.sync(() => ({ id, status: "idle" as const, usage: { totalCredits: credits, llmCredits: credits - 2, vmCredits: 2, imageCredits: 0 } }))
+      })
+    )
+    const opened = await client.agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })
+    const model = opened.configOptions?.find((o) => o.id === "model")
+    expect(model && "options" in model ? model.options.map((o) => ("name" in o ? o.name : "")) : []).toEqual([
+      "Opus 5.5",
+      "Particle-1 · free",
+      "Inkling 2 Small · $0.30/$1.00 per 1M"
+    ])
+    const notices = () => client.updates.filter((u) => u.sessionUpdate === "notice")
+    const prompt = (text: string) =>
+      client.agent.request(acp.methods.agent.session.prompt, { sessionId: opened.sessionId, prompt: [{ type: "text", text }] })
+
+    credits = 12
+    await prompt("one")
+    expect(notices()).toEqual([
+      {
+        sessionUpdate: "notice",
+        severity: "info",
+        title: "Capy credits: $0.01",
+        description: "This thread has used $0.01 of Capy credits (models $0.01, machines less than $0.01)."
+      }
+    ])
+    // A turn on a subscription adds no credits and shows nothing.
+    await prompt("two")
+    expect(notices()).toHaveLength(1)
+    credits = 5_012
+    await prompt("three")
+    expect(notices().at(-1)).toMatchObject({ title: "Capy credits: $5.00", description: expect.stringContaining("$5.01") })
     await client.close()
   })
 })
