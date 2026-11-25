@@ -109,7 +109,7 @@ describe("runTurn when the connection fails", () => {
       const { result, updates } = yield* drive(f)
       expect(result.stopReason).toBe("end_turn")
       expect(f.opens.length).toBe(13)
-      expect(texts(updates)).toContain("Lost the connection to Capy (Capy stream dropped: socket hang up)")
+      expect(texts(updates)).toContain("**Lost the connection to Capy** (Capy stream dropped: socket hang up)")
       expect(toolStatuses(updates)).toEqual(["in_progress", "failed"])
     }))
 

@@ -32,6 +32,9 @@ export class CapyConfigError extends Data.TaggedError("CapyConfigError")<{
 
 export type CapyError = CapyApiError | CapyTransportError | CapyConfigError
 
+export const isCapyError = (error: unknown): error is CapyError =>
+  error instanceof CapyApiError || error instanceof CapyTransportError || error instanceof CapyConfigError
+
 export const Model = Schema.Struct({
   id: Schema.String,
   name: Schema.String,

@@ -11,10 +11,11 @@ import { randomUUID } from "node:crypto"
 import * as acp from "@agentclientprotocol/sdk"
 import type { SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk"
 import { Cause, Deferred, Effect, Exit, type Layer, ManagedRuntime } from "effect"
-import { CapyClient, type CapyError, describeError, type Model, layer as capyLayer } from "./capy/client.js"
+import { CapyClient, type CapyError, describeError, isCapyError, type Model, layer as capyLayer } from "./capy/client.js"
 import { type ChangeTracker, makeChangeTracker, makeWorktreeTracker } from "./changes.js"
 import type { AdapterConfig } from "./config.js"
 import { fetchPrices, formatCredits, modelDescription, modelLabel, type Price } from "./pricing.js"
+import { noApiKey, type Problem, problemOf, rejectedApiKey, toMarkdown, unreachable } from "./problems.js"
 import { promptParts } from "./prompt.js"
 import { API_KEY_AUTH, savedApiKey } from "./setup.js"
 import { makeSessionStore, type SessionRecord } from "./store.js"
@@ -27,7 +28,7 @@ import { readDeviceId, readGit, readLinkedFolders, resolveWorkspace, type Resolv
 interface Setup {
   /** Undefined when the folder cannot run Capy threads; `problem` then says why and how to fix it. */
   resolved: ResolvedWorkspace | undefined
-  problem: string | undefined
+  problem: Problem | undefined
   deviceId: string
   /** Watches the folder the thread works in, so the adapter can show the diffs. */
   changes: ChangeTracker | undefined
@@ -189,7 +190,19 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     const exit = await runtime.runPromiseExit(effect)
     if (Exit.isSuccess(exit)) return exit.value
     const failure = exit.cause.reasons.find(Cause.isFailReason)
-    throw new Error(failure === undefined ? Cause.pretty(exit.cause) : describeError(failure.error))
+    throw failure === undefined ? new Error(Cause.pretty(exit.cause)) : failure.error
+  }
+
+  /** The fix for a failed setup step: a missing or rejected key, no network, no device. */
+  const setupProblem = (reason: unknown): Problem => {
+    const known = problemOf(reason)
+    if (known !== undefined) return known
+    if (isCapyError(reason)) {
+      if (reason._tag === "CapyConfigError") return noApiKey(config.apiKeyFile)
+      if (reason._tag === "CapyApiError" && (reason.status === 401 || reason.status === 403)) return rejectedApiKey(describeError(reason))
+      return unreachable(config.apiUrl, describeError(reason))
+    }
+    return { title: "capy-acp could not start", detail: reason instanceof Error ? reason.message : String(reason), steps: ["Send your message again."] }
   }
 
   /** Folder → project → device workspace. Never throws: failures become the session's `problem`. */
@@ -204,7 +217,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     // fixed without them. (Folder and git reads never reject.)
     if (projects.status === "rejected" || deviceId.status === "rejected" || linked.status === "rejected" || git.status === "rejected") {
       const reason: unknown = [projects, deviceId, linked, git].flatMap((r) => (r.status === "rejected" ? [r.reason] : []))[0]
-      return { deviceId: "", resolved: undefined, problem: reason instanceof Error ? reason.message : String(reason), changes: undefined }
+      return { deviceId: "", resolved: undefined, problem: setupProblem(reason), changes: undefined }
     }
     const resolution = resolveWorkspace({
       cwd,
@@ -214,7 +227,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
       mode: config.workspaceMode,
       allowWorktreeFallback: config.allowWorktreeFallback
     })
-    if (resolution._tag === "Unresolved") return { deviceId: deviceId.value, resolved: undefined, problem: resolution.message, changes: undefined }
+    if (resolution._tag === "Unresolved") return { deviceId: deviceId.value, resolved: undefined, problem: resolution.problem, changes: undefined }
     const workspace = resolution.value.workspace
     const changes = workspace.kind === "linked"
       ? makeChangeTracker(workspace.root, log)
@@ -254,7 +267,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     sessions.set(sessionId, session)
     log(
       setup.resolved === undefined
-        ? `session ${sessionId}: cannot run in ${folder}: ${setup.problem}`
+        ? `session ${sessionId}: cannot run in ${folder}: ${setup.problem?.title}`
         : `session ${sessionId}: ${setup.resolved.repo} in project ${setup.resolved.projectName} (${setup.resolved.workspace.kind})`
     )
     return configOptions(session, available, await loadPrices())
@@ -393,7 +406,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         if (Deferred.isDoneUnsafe(cancel)) return { stopReason: "cancelled" as const }
         const resolved = session.resolved
         if (resolved === undefined) {
-          await say(`capy-acp can't run here. ${session.problem ?? ""}`)
+          if (session.problem !== undefined) await say(toMarkdown(session.problem))
           return ended
         }
         if (!session.noteShown && resolved.note !== undefined) {
@@ -439,15 +452,20 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
           log(`session ${params.sessionId}: ${describeError(error)}`)
           if (resolved.workspace.kind === "linked" && session.threadId === undefined && isNotLinked(error)) {
             // The folder list on disk can lag the server, or the link was removed: say how to fix it.
-            const root = resolved.workspace.root
-            Object.assign(session, {
-              resolved: undefined,
-              changes: undefined,
-              problem: `Capy says this device does not link ${root}. ${resolved.linkFix}`
-            })
-            await say(`capy-acp can't run here. ${session.problem}`)
+            Object.assign(session, { resolved: undefined, changes: undefined, problem: resolved.notLinked })
+            await say(toMarkdown(resolved.notLinked))
+          } else if (error._tag === "CapyApiError" && error.status >= 400 && error.status < 500 && error.status !== 429) {
+            await say(toMarkdown(error.status === 401 || error.status === 403 ? rejectedApiKey(describeError(error)) : {
+              title: "Capy did not take this message",
+              detail: `Nothing was sent. ${describeError(error)}`,
+              steps: ["Fix what the error names, then send your message again."]
+            }))
           } else {
-            await say(`capy-acp could not send this message to Capy, so nothing was sent. ${describeError(error)}`)
+            await say(toMarkdown(error._tag === "CapyConfigError" ? noApiKey(config.apiKeyFile) : {
+              title: "Send your message again",
+              detail: `capy-acp could not reach Capy, so nothing was sent. ${describeError(error)}`,
+              steps: []
+            }))
           }
           return ended
         }

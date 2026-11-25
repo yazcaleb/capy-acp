@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { desktopConfigDir, readConfig } from "../src/config.js"
 import { parseRemote, readDeviceId, readGit, resolveWorkspace, samePath } from "../src/workspace.js"
+import { problemOf } from "../src/problems.js"
 
 const dirs: Array<string> = []
 afterEach(() => {
@@ -21,10 +22,20 @@ describe("resolveWorkspace", () => {
   })
 
   it("explains each setup problem with its fix", () => {
-    expect(resolveWorkspace({ ...base, gitRoot: undefined, linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("not in a git repository") })
-    expect(resolveWorkspace({ ...base, repos: [], linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("no git remote that names a GitHub repository") })
-    expect(resolveWorkspace({ ...base, projects: [], linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("No Capy project includes acme/app") })
-    expect(resolveWorkspace({ ...base, mode: "worktree", linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("not a linked folder") })
+    const problem = (input: Partial<Parameters<typeof resolveWorkspace>[0]>) => {
+      const resolution = resolveWorkspace({ ...base, linked: [], ...input })
+      return resolution._tag === "Unresolved" ? resolution.problem : undefined
+    }
+    expect(problem({ gitRoot: undefined })).toMatchObject({ title: "Open a repository to use Capy", detail: expect.stringContaining("/w/app is not in a git repository") })
+    expect(problem({ repos: [] })).toMatchObject({ title: "Add the GitHub remote" })
+    expect(problem({ projects: [] })).toMatchObject({ title: "Add acme/app to a Capy project", steps: [expect.stringContaining("https://capy.ai/settings/projects"), expect.any(String)] })
+    expect(problem({ mode: "worktree" })).toMatchObject({ title: "Link this folder to Capy", detail: expect.stringContaining("/w/app is not linked") })
+    // T3 Code runs a chat without a project in a scratch folder.
+    expect(problem({ cwd: "/Users/me/.t3/scratch/2026-11-25-hi-8484d544", gitRoot: undefined })).toEqual({
+      title: "Open a project to use Capy",
+      detail: "T3 Code started this chat without a project. Capy threads run on a GitHub repository from one of your Capy projects.",
+      steps: ["In T3 Code, add a project for a clone of that repository.", "Start a new chat in that project."]
+    })
   })
 
   it("lets Capy check a folder that the local list does not show, with the fix ready for a refusal", () => {
@@ -32,7 +43,7 @@ describe("resolveWorkspace", () => {
     const resolution = resolveWorkspace({ ...base, linked: [{ root: "/w/other", repos: ["acme/app"] }] })
     expect(resolution).toMatchObject({
       _tag: "Resolved",
-      value: { workspace: { kind: "linked", root: "/w/app" }, linkFix: expect.stringContaining("CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1") }
+      value: { workspace: { kind: "linked", root: "/w/app" }, notLinked: { steps: expect.arrayContaining([expect.stringContaining("CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1")]) } }
     })
     expect(resolveWorkspace({ ...base, linked: [] })).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "/w/app" } } })
     // Git resolves symlinks; the folder goes in the spelling the client opened.
@@ -102,9 +113,11 @@ describe("readDeviceId", () => {
   it("names both files and the ways out when Capy isn't paired here", async () => {
     const dir = mkdtempSync(join(tmpdir(), "capy-acp-device-"))
     dirs.push(dir)
-    await expect(readDeviceId(configIn(dir))).rejects.toThrow(
-      /No paired Capy device found: neither .*device-ids\.json nor .*dock[/\\]status\.json names one.*capy dock.*CAPY_DEVICE_ID/
-    )
+    const error = await readDeviceId(configIn(dir)).catch((e: unknown) => e)
+    expect(problemOf(error)).toMatchObject({
+      title: "Start Capy on this computer",
+      steps: [expect.stringContaining("capy dock"), expect.any(String), expect.stringMatching(/device-ids\.json and .*dock[/\\]status\.json.*CAPY_DEVICE_ID/)]
+    })
   })
 
   it("finds the device a headless `capy dock` paired, which writes no desktop files", async () => {
@@ -126,6 +139,6 @@ describe("readDeviceId", () => {
     writeFileSync(join(dir, "device-ids.json"), JSON.stringify({ orgs: { org_a: "device_A" } }))
     expect(await readDeviceId(configIn(dir))).toBe("device_A")
     writeFileSync(join(dir, "device-ids.json"), JSON.stringify({ orgs: { org_a: "device_A", org_b: "device_B" } }))
-    await expect(readDeviceId(configIn(dir))).rejects.toThrow(/set CAPY_DEVICE_ID/)
+    await expect(readDeviceId(configIn(dir))).rejects.toThrow(/Choose a Capy organization/)
   })
 })

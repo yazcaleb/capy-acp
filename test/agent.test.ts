@@ -207,9 +207,8 @@ describe("agent sessions", () => {
     const { sessionId } = await client.agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })
     const first = await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })
     expect(first.stopReason).toBe("end_turn")
-    expect(client.updates).toEqual([
-      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "capy-acp can't run here. No Capy API key: set CAPY_API_KEY." } }
-    ])
+    expect(client.updates).toEqual([{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: expect.stringMatching(/^\*\*Add your Capy API key\*\*\n\n/) } }])
+    expect(JSON.stringify(client.updates)).toContain("npx -y capy-acp --setup")
     key = true
     await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })
     expect(log.creates).toHaveLength(1)
@@ -233,7 +232,8 @@ describe("agent sessions", () => {
     const { sessionId } = await client.agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })
     await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })
     const reply = client.updates.flatMap((u) => (u.sessionUpdate === "agent_message_chunk" && u.content.type === "text" ? [u.content.text] : [])).join("")
-    expect(reply).toContain(`Capy says this device does not link ${repo}.`)
+    expect(reply).toContain("**Link this folder to Capy**")
+    expect(reply).toContain(`${repo} is not linked`)
     expect(reply).toContain("https://capy.ai/settings/projects")
     // The user links the folder in Capy; the local list stays empty.
     linked = true

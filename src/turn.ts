@@ -350,27 +350,30 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
       const stillOpen = closedTools(closed.updates).at(-1)?.toolCallId
       yield* showChanges(stillOpen, yield* tracker.collect, closeAs)
     }
-    if (outcome === "failed") yield* input.emit(chunk("\n\nCapy reported that this run failed. The thread keeps its transcript; send another message to retry."))
-    if (outcome === "archived") yield* input.emit(chunk("\n\nThe Capy thread was archived. Start a new session to continue."))
+    if (outcome === "failed") yield* input.emit(chunk("\n\n**Capy reported that this run failed.** The thread keeps its transcript. Send another message to retry."))
+    if (outcome === "archived") yield* input.emit(chunk("\n\n**This Capy thread is archived.** Start a new chat to continue."))
     if (outcome === "lost") {
       yield* input.emit(
         chunk(
-          `\n\nLost the connection to Capy (${lost === undefined ? "unknown error" : describeError(lost)}). Capy may still be working in its ` +
-            "thread; your next message here continues from where this reply stopped."
+          `\n\n**Lost the connection to Capy** (${lost === undefined ? "unknown error" : describeError(lost)}). Capy may still be ` +
+            "working in its thread. Your next message here continues from where this reply stopped."
         )
       )
     }
     if (outcome === "not-started") {
       yield* input.emit(
         chunk(
-          "Capy has not started on this message yet. Make sure that the Capy desktop app or `capy dock` runs on this machine " +
-            "and is signed in. The message stays in the thread queue."
+          "**Capy has not started on this message yet.** Check that the Capy desktop app or `capy dock` runs on this computer " +
+            "and is signed in. The message stays in the queue, and Capy starts it when the device is back."
         )
       )
     }
     if (outcome === "waiting-limit") {
       yield* input.emit(
-        chunk("\n\nCapy is still waiting on a background command or event. It will continue in its thread on its own; send a message here to check on it.")
+        chunk(
+          "\n\n**Capy is waiting on a background command.** It continues in its thread on its own, and the Capy app shows the " +
+            "rest. A new message here stops the wait, so send one only when you want Capy to change course."
+        )
       )
     }
     return { threadId: id, cursor: state.cursor, stopReason: outcome === "cancelled" ? "cancelled" : "end_turn" }

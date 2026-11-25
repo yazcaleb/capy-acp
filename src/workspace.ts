@@ -11,6 +11,17 @@ import { readFile, realpath } from "node:fs/promises"
 import { join, posix, relative, resolve, win32 } from "node:path"
 import { promisify } from "node:util"
 import type { AdapterConfig } from "./config.js"
+import {
+  manyOrganizations,
+  noDevice,
+  noGitHubRemote,
+  notGit,
+  notInProject,
+  notLinked,
+  type Problem,
+  ProblemError,
+  unreadableDeviceFile
+} from "./problems.js"
 
 const run = promisify(execFile)
 
@@ -48,13 +59,13 @@ export interface ResolvedWorkspace {
   readonly workspace: DeviceWorkspace
   /** Shown to the user once, in the first reply, when the thread will not edit the open folder. */
   readonly note: string | undefined
-  /** What to do if Capy refuses the linked root: how to link the folder. */
-  readonly linkFix: string
+  /** What to show if Capy refuses the linked root: how to link the folder. */
+  readonly notLinked: Problem
 }
 
 export type Resolution =
   | { readonly _tag: "Resolved"; readonly value: ResolvedWorkspace }
-  | { readonly _tag: "Unresolved"; readonly message: string }
+  | { readonly _tag: "Unresolved"; readonly problem: Problem }
 
 /**
  * `owner/repo` from a remote URL, lowercased for matching. Any host name counts, because ssh configs often
@@ -82,10 +93,8 @@ export const resolveWorkspace = (input: {
   readonly allowWorktreeFallback: boolean
   readonly platform?: NodeJS.Platform
 }): Resolution => {
-  const unresolved = (message: string): Resolution => ({ _tag: "Unresolved", message })
-  if (input.gitRoot === undefined) {
-    return unresolved(`${input.cwd} is not in a git repository. capy-acp runs Capy threads on a repository that belongs to a Capy project.`)
-  }
+  const unresolved = (problem: Problem): Resolution => ({ _tag: "Unresolved", problem })
+  if (input.gitRoot === undefined) return unresolved(notGit(input.cwd))
   const gitRoot = input.gitRoot
   const here = input.linked.find((folder) => samePath(folder.realRoot ?? folder.root, gitRoot) || samePath(folder.root, gitRoot))
   // A linked folder lists its repositories, so a clone whose remotes name none of them still matches.
@@ -94,20 +103,11 @@ export const resolveWorkspace = (input: {
   const repo = candidates.find((candidate) => matches(candidate) !== undefined)
   const project = repo === undefined ? undefined : matches(repo)
   if (repo === undefined || project === undefined) {
-    if (candidates.length === 0) {
-      return unresolved(
-        `${gitRoot} has no git remote that names a GitHub repository. capy-acp runs Capy threads on a repository that belongs to a Capy project.`
-      )
-    }
-    return unresolved(`No Capy project includes ${candidates.join(" or ")}. Add the repository to a project at https://capy.ai, then retry.`)
+    return unresolved(candidates.length === 0 ? noGitHubRemote(gitRoot) : notInProject(candidates))
   }
   const sameRepo = input.linked.find((folder) => folder !== here && folder.repos.some((r) => r.toLowerCase() === repo))
-  const linkFix =
-    `Link ${gitRoot} to this device in Capy: open https://capy.ai/settings/projects, choose "${project.name}", ` +
-    "and add the folder under Project folders (or use Scan a folder in the Capy desktop app, or run `capy dock dirs add` " +
-    "on a machine paired with capy dock). Then send your message again." +
-    (sameRepo === undefined ? "" : ` Or set CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1 to work in a worktree of ${sameRepo.root} instead.`)
-  const base = { projectId: project.id, projectName: project.name, repo, linkFix }
+  const notLinkedHere = notLinked({ root: gitRoot, projectName: project.name, sameRepoRoot: sameRepo?.root })
+  const base = { projectId: project.id, projectName: project.name, repo, notLinked: notLinkedHere }
   if (here !== undefined) {
     return input.mode === "linked"
       ? { _tag: "Resolved", value: { ...base, workspace: { kind: "linked", root: here.root }, note: undefined } }
@@ -134,7 +134,7 @@ export const resolveWorkspace = (input: {
   }
   if (input.mode === "worktree") {
     // A worktree is made from a linked folder of the repository, and none is known.
-    return unresolved(`${gitRoot} is not a linked folder on this Capy device. ${linkFix}`)
+    return unresolved(notLinkedHere)
   }
   // Not in the local list, which can be older than Capy's own, or unreadable. Capy checks the root when
   // the thread starts and refuses one it does not link; the reply then gives `linkFix`. Git prints
@@ -161,21 +161,18 @@ export const readDeviceId = async (config: AdapterConfig): Promise<string> => {
     ids = Object.values(data.orgs ?? {}).filter((id): id is string => typeof id === "string" && id !== "")
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw new Error(`Could not read the Capy desktop app's device file ${desktop}: ${error instanceof Error ? error.message : String(error)}`)
+      throw new ProblemError(unreadableDeviceFile(desktop, error instanceof Error ? error.message : String(error)))
     }
   }
   if (ids.length === 1 && ids[0]) return ids[0]
-  if (ids.length > 1) throw new Error(`This machine is paired with ${ids.length} Capy organizations; set CAPY_DEVICE_ID to choose one.`)
+  if (ids.length > 1) throw new ProblemError(manyOrganizations(ids.length))
   const dock = join(config.capyHome, "dock", "status.json")
   const docked = await readJson(dock).then(
     (data) => (data as { deviceId?: unknown }).deviceId,
     () => undefined
   )
   if (typeof docked === "string" && docked !== "") return docked
-  throw new Error(
-    `No paired Capy device found: neither ${desktop} nor ${dock} names one. Sign in to the Capy desktop app on this machine, ` +
-      "or pair it with `capy dock`, or set CAPY_DEVICE_ID (and CAPY_DESKTOP_CONFIG_DIR or CAPY_HOME if Capy keeps its files elsewhere)."
-  )
+  throw new ProblemError(noDevice([desktop, dock]))
 }
 
 export const readLinkedFolders = async (config: AdapterConfig): Promise<ReadonlyArray<LinkedFolder>> => {
