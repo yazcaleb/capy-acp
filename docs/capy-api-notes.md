@@ -8,14 +8,15 @@ computer, as Capy device threads.
 capy-acp is a community project. Capy did not make it.
 
 **The short version.** The API was enough to build a working adapter: streaming, resume, cancel, files, subagents and
-diffs work on Linux, macOS and Windows. Seven additive changes would remove almost all of its workarounds, and none breaks an existing client.
-Asks 1, 2 and 6 only expose data that Capy already has. The first one matters most:
+diffs work on Linux, macOS and Windows. Seven additive changes would remove almost all of its workarounds. Asks 1, 2 and 6 only
+expose data that Capy already has. (The published response schemas set `additionalProperties: false`, so the spec would
+need to allow the new fields for clients that decode strictly.) The first one matters most:
 a public, read-only way to find the device on this machine and the folders it links. Today every integrator has to read
 private Capy files to get them.
 
 Each claim below cites a recording in `fixtures/`, a live API response, or a docs page. All were checked again on
-2026-11-25. The recordings come from the desktop app 0.6.0 and `capy dock` 0.7.2; the current 0.10.0 and 0.9.2 were checked
-statically, not run. Each recording's `thread-id` and `thread.json` give the thread id and timestamps for your server logs.
+2026-11-25. The recordings come from the desktop app 0.6.0, and the live checks also used `capy dock` 0.7.2. The current
+0.10.0 and 0.9.2 were checked statically, not run. Each recording's `thread-id` and `thread.json` give the thread id and timestamps for your server logs.
 
 ## Contents
 
@@ -101,17 +102,19 @@ after the closing `status: idle` in 4 of the 7 recorded runs that ended with a r
 Astra `s1-write` and Astra `s2-edit`. A client that ends the turn on `idle` saves a cursor that is one entry short, and the next
 turn shows the last reply again. capy-acp had exactly this bug.
 
-**Position.** `GET /threads/{id}/messages` ends with `cursor: null`, and its tool entries carry the call id, not the event
-id. In the fixture `fixtures/anthropic_claude-opus-5-5/s1-write/stream.sse`, a tool entry has `id: toolu_01Ds…` in its data
-and `01M84218Z7…` as its SSE id. After a restart, a client cannot find out where to resume from the message list.
+**Position.** `GET /threads/{id}/messages` ends with `cursor: null`. User and assistant entries use their event id as
+their `id`, but tool entries carry the call id. In `fixtures/anthropic_claude-opus-5-5/s1-write/stream.sse`, a tool entry
+has `id: toolu_01Ds…` in its data and `01M84218Z7…` as its SSE id. When the newest entries are tool entries, the message
+list cannot give the resume point: a client falls back to the newest user or assistant id and receives the tool entries
+after it again.
 
 **Run and turn frames.** In 4 of 9 recorded streams there is no `run start` (all three Astra streams, and the Opus
-follow-up). The four streams opened right after a thread was created on a Claude model start with `turn end` `aborted` and
-`run end` before `run start`. A client cannot use these frames to mark a turn. This may be a replay of the previous run's
+follow-up). The four streams opened right after a thread was created on a Claude model start with an empty `turn start`,
+`turn end` (`aborted`) pair and a `run end`, all before `run start`. A client cannot use these frames to mark a turn. This may be a replay of the previous run's
 end, which would be fine if the docs said so.
 
 **Cost.** A 10 s grace timer after `idle` (`END_GRACE_MS` in `src/turn.ts`), a `GET /threads/{id}` check when the stream
-closes, a cursor write after every frame, and a load that moves the cursor to the newest replayed entry.
+closes, a cursor write after every transcript entry, and a load that moves the cursor to the newest replayed entry.
 
 **Proposal.**
 
@@ -150,18 +153,19 @@ calls: [{
 }]
 ```
 
-The same `summary` on the live `tool_call` frame of an `execute` call would give the editor something to show while the
-call runs.
+Filling the existing `text` of the live `tool_call` frame for `execute` calls (empty today) would give the editor
+something to show while the call runs.
 
 ### 4. Where a thread runs
 
-**Today.** `GET /threads/{id}` returns 30 fields, and none of them says where the thread runs. capy-acp looks for the thread's
-worktree at `~/.capy/worktrees/<threadId>/<repo>`. Two recent changes make that weaker:
+**Today.** `GET /threads/{id}` returns 30 fields, and none of them says where the thread runs. capy-acp finds the thread's
+worktree in the private worktree list in `~/.capy/device/workspaces.json` (by `createdJamId`), or else at
+`~/.capy/worktrees/<threadId>/<repo>`. Two changes make that weaker:
 
-- Since 0.9.2 a user can choose another worktree folder (Settings, then Devices, then Worktree folder). capy-acp now reads
-  the private worktree list in `~/.capy/device/workspaces.json` to find it, which is one more private file to depend on. The
-  docs for the desktop app and the dock still say `~/.capy/worktrees`.
-- Since 0.9.0 a thread can move to another device or to the cloud ("Continue on"). The API does not report the move, so a
+- Since 0.9.2 a user can choose another worktree folder (Settings, then Devices, then Worktree folder). That is why
+  capy-acp reads the private worktree list, which is one more private file to depend on. The docs for the desktop app and
+  the dock still say `~/.capy/worktrees`.
+- A thread can move to the cloud (since 0.4.2) and, since 0.9.0, to another device ("Continue on"). The API does not report the move, so a
   client can keep watching a folder that the thread left.
 
 **Proposal.**
@@ -211,11 +215,17 @@ and would be `null` for models on a subscription or the user's key.
 ### 7. Token usage on `turn end`
 
 **Today.** The stream gives no usage. `Thread.usage` gives credits for the whole thread (llm, image, vm, total).
-`GET /usage/series` gives token totals in hourly buckets that can still change. ACP's `usage_update` needs the tokens in
+`GET /usage/series` gives token totals in daily or hourly buckets that can still change. ACP's `usage_update` needs the tokens in
 context and the context size, so capy-acp sends none. After each turn it reads `Thread.usage` and shows the credits that the
 turn added, if any.
 
-**Proposal.** `turn end` + `usage: {inputTokens, outputTokens, cacheReadTokens, contextTokens, contextWindow, credits}`.
+**Proposal.** On `turn end`, this turn's numbers in the shapes that already exist:
+
+```text
+usage:  { llmCredits, imageCredits, vmCredits, totalCredits }      (as Thread.usage)
+tokens: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }   (as /usage/series)
+        + contextTokens, contextWindow
+```
 
 ## Small fixes
 
@@ -223,8 +233,9 @@ turn added, if any.
   `attachments` and `references` as `null`. The published `Message` schema marks them optional and not nullable, and the
   stream leaves them out. A client that decodes with the published schema fails on a whole page. capy-acp's `session/load`
   did, until it switched to decoding one field at a time.
-- **An untagged error.** `GET /threads/{id}/messages?after=<bad cursor>` answers `400` with an empty body. The stream answers
-  the same mistake with `capy/InvalidRequest "Invalid event cursor"`.
+- **An untagged error.** `GET /threads/{id}/messages?after=<bad cursor>` answers `400` with an empty body when the cursor
+  is not 26 characters long, and `200` with an empty page when a 26-character cursor is not an event id. The stream answers
+  a bad cursor with `capy/InvalidRequest "Invalid event cursor"`.
 - **Tags for device errors.** "Device not found" and "This device does not link a folder at …" are both
   `capy/InvalidRequest`. Tags such as `capy/DeviceNotFound` and `capy/FolderNotLinked {root}` would let a client react
   without parsing the message. `capy/DeviceAccessDenied` exists on `POST /threads/{id}/message`, but not on thread create.
@@ -239,7 +250,8 @@ turn added, if any.
 ## What I take to be intended
 
 - The stream never gives the model's reasoning. The docs say so.
-- Capy opens a pull request only when asked. No recording showed a commit or a PR without a request.
+- Capy opens a pull request only when asked (docs: Pull requests). Every recording forbade commits and PRs, and none
+  happened.
 - There is no per-tool approval, so ACP permission requests have nothing to map to. capy-acp never asks the client for
   permission, and its README says so.
 - The free-with-ads models are only for the app. They are not in the API's model list.
@@ -267,7 +279,7 @@ turn added, if any.
 | Does `linked` mode work? | Yes. The thread runs in the root (`pwd` is the root) and edits it in place, with no worktree. The frames are the same as in worktree mode. | `fixtures/anthropic_claude-opus-5-5/s2-edit-linked` |
 | Can a client link a folder? | Not through the API. Folders are linked in the app (Scan a folder, or Settings, then Project folders) or with `capy dock dirs add`. | `openapi.json` |
 | Must the repository be in a Capy project? | Yes. Thread create requires `projectId`. | `openapi.json` |
-| Does a thread commit or open a PR without a request? | Not in any recording. All 3 models obeyed "do not commit, push, or open a PR". | `git status` after each run |
+| Does a thread obey "do not commit, push, or open a PR"? | Yes, all 3 models. The docs say that Capy opens a PR only when asked. | `git status` after each run |
 | What did the runs cost? | 0 credits (`usage.totalCredits = 0`) on connected subscriptions. | `fixtures/*/*/thread.json` |
 
 ### Model routes
@@ -278,7 +290,7 @@ turn added, if any.
 | Model id | Reasoning | Route in the recordings | Tool frames |
 | --- | --- | --- | --- |
 | `anthropic/claude-opus-5-5` | high | `member_seat` | `execute`, empty `text`, `calls` with `bash` and `write` |
-| `openai/gpt-6.2-astra` | high | `member_seat` | `execute`, empty `text`, `calls` with `bash` and `apply_patch`. Sends a short message before its tools |
+| `openai/gpt-6.2-astra` | high | `member_seat` | `execute`, empty `text`, `calls` with `bash` and `apply_patch`. Sent a short message before its tools in 2 of its 3 recordings |
 | `anthropic/claude-haiku-5-5` | low | `member_seat` | `bash` with a one-line summary, no `calls` |
 
 ### Recorded errors
@@ -298,7 +310,8 @@ these, and the tests cover them with a fake transport.
 ### Stream facts
 
 - A follow-up with `Last-Event-ID: <last transcript id>` starts at the new user entry and replays nothing (`s3-followup`).
-- An interrupt during a reply (`s4-interrupt`): the fragments stop, then `turn end` (`settled`), `run end`, `status: idle`.
+- An interrupt during a reply (`s4-interrupt`): the fragments stop, then `run start`, `turn end` (`settled`), `run end`, the
+  user entry, `status: idle` and a second `run end`.
   Capy commits no assistant entry, so the partial reply exists only in the live frames.
 - A thread whose model put a command in the background (Astra, `sleep 90`) ends the run with `status: waiting`. The docs say
   that it continues when the command finishes. An interrupt on a waiting thread cancelled the wake: no later entry appeared.
