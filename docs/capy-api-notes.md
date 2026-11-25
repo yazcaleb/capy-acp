@@ -2,17 +2,20 @@
 
 Feedback on the Capy public API from building [capy-acp](../README.md), which runs Capy device threads from any Agent Client
 Protocol (ACP) client. The goal is one client integration that puts Capy in T3 Code, Zed, JetBrains IDEs, Neovim, Emacs and
-the other ACP editors. Device threads run on the user's own machine and subscriptions, so they use no Capy machine time.
+the other ACP editors, so their users can pick Capy from the agent menu they already use. The threads run on the user's own
+computer, as Capy device threads.
 
 capy-acp is a community project. Capy did not make it.
 
 **The short version.** The API was enough to build a working adapter: streaming, resume, cancel, files, subagents and
-diffs work on Linux, macOS and Windows. Seven changes would remove almost all of its workarounds. The first one matters most:
+diffs work on Linux, macOS and Windows. Seven additive changes would remove almost all of its workarounds, and none breaks an existing client.
+Asks 1, 2 and 6 only expose data that Capy already has. The first one matters most:
 a public, read-only way to find the device on this machine and the folders it links. Today every integrator has to read
 private Capy files to get them.
 
 Each claim below cites a recording in `fixtures/`, a live API response, or a docs page. All were checked again on
-2026-11-25. Thread ids and timestamps for any item are available on request, so you can match them to server logs.
+2026-11-25. The recordings come from the desktop app 0.6.0 and `capy dock` 0.7.2; the current 0.10.0 and 0.9.2 were checked
+statically, not run. Each recording's `thread-id` and `thread.json` give the thread id and timestamps for your server logs.
 
 ## Contents
 
@@ -39,15 +42,20 @@ Each claim below cites a recording in `fixtures/`, a live API response, or a doc
 
 ## The asks, ranked
 
-| # | Ask | What the user sees today | What capy-acp does instead |
-| --- | --- | --- | --- |
-| 1 | Find the device and its linked folders | Setup fails when Capy moves a local file. An unlinked folder is found only after the first prompt fails | Reads `device-ids.json`, `~/.capy/dock/status.json` and `~/.capy/device/workspaces.json`, then sends a root and matches the 400 message with a regex |
-| 2 | A turn-commit and cursor contract | Without care: the last reply shows again on the next turn, or a reply is lost after a reload | Waits for `done` on an `until=run` stream, with a 10 s grace timer, then checks `GET /threads/{id}`. Saves the cursor after every frame |
-| 3 | Tool call detail and status | "write, bash (1.6 s)" with no command, no output and no changed files. A stopped call can look finished | 288 lines of git diffing (`src/changes.ts`). Guesses the outcome of a stopped call |
-| 4 | Where a thread runs | Diffs disappear if the thread moves to another machine | Finds the worktree in the private worktree list of `workspaces.json`, or at `~/.capy/worktrees/<threadId>/<repo>` |
-| 5 | Files on thread create | "No image came through", then a second answer when the image arrives | Saves the files on the device and sends their paths in the text |
-| 6 | Prices and input types on `GET /models` | A picker that cannot say which models are free, or which accept images | Parses the price table of the docs page. Offers images for every model |
-| 7 | Token usage on `turn end` | No context or usage meter | Shows credits after a turn from `GET /threads/{id}`. Sends no ACP usage update |
+Each ask has its own section below, with the evidence, the cost today and a proposed shape.
+
+1. **[Find the device and its linked folders](#1-find-the-device-and-its-linked-folders)** (read-only). Today setup breaks
+   when Capy moves a local file, and an unlinked folder shows up only when the first prompt fails.
+2. **[A turn-commit and cursor contract](#2-a-turn-commit-and-cursor-contract).** Without it, a client shows the last reply
+   again on the next turn, or loses a reply after a reload.
+3. **[Tool call detail and status](#3-tool-call-detail-and-status).** Today a tool item says "write, bash (1.6 s)", with no
+   command and no changed files, and a stopped call can look finished.
+4. **[Where a thread runs](#4-where-a-thread-runs).** Diffs stop when the thread moves to another computer.
+5. **[Files on thread create](#5-files-on-thread-create).** Today a fast model answers "No image came through" before the
+   image arrives.
+6. **[Input types and prices on `GET /models`](#6-input-types-and-prices-on-get-models).** A model picker cannot tell which
+   models accept images, or which are free.
+7. **[Token usage on `turn end`](#7-token-usage-on-turn-end).** Editors cannot show a context meter.
 
 ### 1. Find the device and its linked folders
 
@@ -64,19 +72,19 @@ can be out of date, so capy-acp sends the root anyway and reads the answer:
 `400 capy/InvalidRequest "This device does not link a folder at <path>"`.
 
 **Cost.** `readDeviceId` and `readLinkedFolders` in `src/workspace.ts`, a `CAPY_DEVICE_ID` setting for users in more than
-one organization, and a regex on an error message (`isNotLinked` in `src/agent.ts`). The next Capy release that moves a file
-breaks every integration that does this.
+one organization, and a regex on an error message (`isNotLinked` in `src/agent.ts`). A Capy release that moves one of these files
+would break every integration that does this.
 
 **Proposal.** Linking a local path from a cloud API is a security decision, so linking should stay on the machine (app or
 `capy dock dirs add`). Listing is the part that integrations need:
 
-```http
+```text
 GET /devices
-→ { "items": [{ "id": "device_…", "name": "…", "platform": "linux" | "darwin" | "win32",
-                "kind": "desktop" | "dock", "online": true, "lastSeenAt": "…" }] }
+  items: [{ id, name, platform: linux | darwin | win32,
+            kind: desktop | dock, online, lastSeenAt }]
 
 GET /devices/{id}/folders
-→ { "items": [{ "root": "/home/me/app", "repos": ["acme/app"] }] }
+  items: [{ root: "/home/me/app", repos: ["acme/app"] }]
 ```
 
 A client also needs to know which device is the machine that it runs on. An API key cannot tell. A documented local command
@@ -108,10 +116,10 @@ closes, a cursor write after every frame, and a load that moves the cursor to th
 **Proposal.**
 
 ```text
-turn end / run end      + "lastEventId": "<event id of the last entry committed so far>"
-GET /threads/{id}       + "latestEventId": "…"
-GET /threads/{id}/messages items  + "eventId": "…"   (the id to pass as Last-Event-ID)
-docs                    which frames a new stream can repeat from an earlier run
+turn end, run end           + lastEventId   (last entry committed so far)
+GET /threads/{id}           + latestEventId
+GET /threads/{id}/messages  + eventId on each item (for Last-Event-ID)
+docs                        which frames a new stream can repeat
 ```
 
 ### 3. Tool call detail and status
@@ -128,16 +136,17 @@ not show at all.
 **Cost.** `src/changes.ts` records a git baseline before each prompt and compares the folder at each tool call boundary. It
 handles CRLF, smudge filters and LFS, and still cannot tell a user's edit from Capy's while a writing call runs.
 
-**Proposal.** Even `status` and `paths` alone would remove most of this.
+**Proposal.** `status` and `paths` alone would remove most of this. If tool detail is private by design, `summary`,
+`exitCode` and output can stay out, or sit behind a flag.
 
-```json
-"calls": [{
-  "tool": "bash",
-  "status": "completed" | "failed" | "interrupted",
-  "durationMs": 347,
-  "summary": "git status --short",
-  "exitCode": 0,
-  "paths": [{ "path": "README.md", "change": "modified" }]
+```text
+calls: [{
+  tool: "bash",
+  status: completed | failed | interrupted,
+  durationMs: 347,
+  summary: "git status --short",
+  exitCode: 0,
+  paths: [{ path: "README.md", change: "modified" }]
 }]
 ```
 
@@ -157,11 +166,11 @@ worktree at `~/.capy/worktrees/<threadId>/<repo>`. Two recent changes make that 
 
 **Proposal.**
 
-```json
-"placement": {
-  "kind": "device",
-  "deviceId": "device_…",
-  "workspace": { "kind": "linked" | "worktree", "root": "/home/me/app", "path": "/home/me/app" }
+```text
+placement: {
+  kind: device | cloud,
+  deviceId: "device_…",
+  workspace: { kind: linked | worktree, root, path }
 }
 ```
 
@@ -178,7 +187,7 @@ from disk. This works only for device threads.
 
 **Proposal.** The same `files` field as `SendMessageRequest`, on create.
 
-### 6. Prices and input types on `GET /models`
+### 6. Input types and prices on `GET /models`
 
 **Today.** A model has `id`, `name`, `billing`, `route`, `reasoningModes`, `fast`, `pro` and `ultrafast`. It has no price, no
 input types and no context window. The prices exist on the docs page "Models & pricing".
@@ -189,13 +198,15 @@ say "Particle-1 · free" or "Inkling 2 Small · $0.30/$1.00 per 1M". If the tabl
 
 **Proposal.**
 
-```json
-"pricing": { "inputPerMTok": 0.30, "cachedInputPerMTok": 0.03, "outputPerMTok": 1.00, "currency": "USD" },
-"inputModalities": ["text", "image"],
-"contextWindow": 1048576
+```text
+inputModalities: ["text", "image"]
+contextWindow: 1048576
+pricing: { inputPerMTok: 0.30, cachedInputPerMTok: 0.03,
+           outputPerMTok: 1.00, currency: "USD" }
 ```
 
-`pricing` would be `null` for models on a subscription or the user's key.
+`inputModalities` matters most: it stops image prompts from going to models that cannot read them. `pricing` is optional,
+and would be `null` for models on a subscription or the user's key.
 
 ### 7. Token usage on `turn end`
 
