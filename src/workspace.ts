@@ -8,7 +8,7 @@
  */
 import { execFile } from "node:child_process"
 import { readFile, realpath } from "node:fs/promises"
-import { join, posix, win32 } from "node:path"
+import { join, posix, relative, resolve, win32 } from "node:path"
 import { promisify } from "node:util"
 import type { AdapterConfig } from "./config.js"
 
@@ -72,6 +72,8 @@ export const parseRemote = (url: string): string | undefined => {
 export const resolveWorkspace = (input: {
   readonly cwd: string
   readonly gitRoot: string | undefined
+  /** The git root in the spelling of the opened folder, which git does not keep (see `readGit`). */
+  readonly openedRoot?: string | undefined
   /** `owner/repo` of each git remote, `origin` first. */
   readonly repos: ReadonlyArray<string>
   readonly linked: ReadonlyArray<LinkedFolder>
@@ -137,7 +139,8 @@ export const resolveWorkspace = (input: {
   // Not in the local list, which can be older than Capy's own, or unreadable. Capy checks the root when
   // the thread starts and refuses one it does not link; the reply then gives `linkFix`. Git prints
   // Windows paths with forward slashes, so the root goes in the form Windows gives it.
-  const root = (input.platform ?? process.platform) === "win32" ? win32.normalize(gitRoot) : gitRoot
+  const opened = input.openedRoot ?? gitRoot
+  const root = (input.platform ?? process.platform) === "win32" ? win32.normalize(opened) : opened
   return { _tag: "Resolved", value: { ...base, workspace: { kind: "linked", root }, note: undefined } }
 }
 
@@ -193,7 +196,9 @@ export const readLinkedFolders = async (config: AdapterConfig): Promise<Readonly
   }
 }
 
-export const readGit = async (cwd: string): Promise<{ gitRoot: string | undefined; repos: ReadonlyArray<string> }> => {
+export const readGit = async (
+  cwd: string
+): Promise<{ gitRoot: string | undefined; openedRoot: string | undefined; repos: ReadonlyArray<string> }> => {
   const git = async (...args: Array<string>) => {
     try {
       return (await run("git", ["-C", cwd, ...args], { timeout: 5_000 })).stdout.trim()
@@ -209,5 +214,10 @@ export const readGit = async (cwd: string): Promise<{ gitRoot: string | undefine
   })
   const ordered = [...remotes.filter((r) => r.name === "origin"), ...remotes.filter((r) => r.name !== "origin")]
   const repos = [...new Set(ordered.flatMap((remote) => parseRemote(remote.url) ?? []))]
-  return { gitRoot, repos }
+  // Git resolves symlinks (macOS `/tmp` is `/private/tmp`), and Capy keeps the spelling the user linked,
+  // which is most likely the one the client opened.
+  const openedRoot = gitRoot === undefined
+    ? undefined
+    : await realpath(cwd).then((real) => resolve(cwd, relative(real, gitRoot)), () => gitRoot)
+  return { gitRoot, openedRoot, repos }
 }

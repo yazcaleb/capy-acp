@@ -35,6 +35,9 @@ describe("resolveWorkspace", () => {
       value: { workspace: { kind: "linked", root: "/w/app" }, linkFix: expect.stringContaining("CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1") }
     })
     expect(resolveWorkspace({ ...base, linked: [] })).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "/w/app" } } })
+    // Git resolves symlinks; the folder goes in the spelling the client opened.
+    const symlinked = resolveWorkspace({ ...base, gitRoot: "/private/tmp/app", openedRoot: "/tmp/app", linked: [] })
+    expect(symlinked).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "/tmp/app" } } })
     // Git prints Windows paths with forward slashes.
     const windows = resolveWorkspace({ ...base, gitRoot: "C:/Users/dev/app", linked: [], platform: "win32" })
     expect(windows).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "C:\\Users\\dev\\app" } } })
@@ -84,8 +87,11 @@ describe("readGit", () => {
     execFileSync("git", ["-C", dir, "init", "-q"])
     execFileSync("git", ["-C", dir, "remote", "add", "upstream", "https://github.com/acme/app.git"])
     execFileSync("git", ["-C", dir, "remote", "add", "origin", "git@github-work:dev/app.git"])
-    const { gitRoot, repos } = await readGit(dir)
+    mkdirSync(join(dir, "src"))
+    const { gitRoot, openedRoot, repos } = await readGit(join(dir, "src"))
     expect(gitRoot).toBeDefined()
+    // tmpdir() is a symlink on macOS; the opened spelling survives.
+    expect(openedRoot).toBe(dir)
     expect(repos).toEqual(["dev/app", "acme/app"])
   })
 })
