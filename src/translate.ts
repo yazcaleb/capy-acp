@@ -12,13 +12,14 @@
  *   that streamed no fragments (a `dropped` turn) can still commit after `Ended`: the runner keeps
  *   reading until the server closes the stream (see turn.ts).
  * - Strong models report every tool as `execute` with empty text; the committed tool entry's
- *   `calls` list names the inner tools, so the title is upgraded when it lands.
+ *   `calls` list names the inner tools, so the title is upgraded when it lands. An `execute` entry
+ *   without that list is a call an interrupt stopped (see `toolStatus`).
  * - Capy never sends a tool's command line, file paths or output. Kinds that promise those
  *   (`execute`, `edit`) are therefore not used for Capy's own frames: clients render them as an
  *   empty command or a nameless file. File edits are reported by `fileChangeUpdate` instead, from
  *   changes the adapter observes on disk (see changes.ts).
  */
-import type { SessionUpdate, ToolCallContent, ToolKind } from "@agentclientprotocol/sdk"
+import type { SessionUpdate, ToolCallContent, ToolCallStatus, ToolKind } from "@agentclientprotocol/sdk"
 import { type CapyEvent, type Message, type MessageAttachment, messageFiles, type ThreadStatus } from "./capy/events.js"
 import type { FileChange } from "./changes.js"
 
@@ -52,6 +53,8 @@ export interface TurnState {
   readonly endPending: boolean
   readonly lastAssistantCallId: string | undefined
   readonly tools: ReadonlyMap<string, ToolState>
+  /** The client cancelled the prompt. */
+  readonly cancelled: boolean
 }
 
 export interface Step {
@@ -70,7 +73,8 @@ export const initialTurn = (cursor: string | undefined): TurnState => ({
   settled: new Set(),
   endPending: false,
   lastAssistantCallId: undefined,
-  tools: new Map()
+  tools: new Map(),
+  cancelled: false
 })
 
 const READ_TOOLS = new Set(["read", "view", "cat", "open"])
@@ -90,6 +94,18 @@ export const toolKind = (names: ReadonlyArray<string>): ToolKind => {
   return "other"
 }
 
+/**
+ * How a committed tool entry ended. Each `execute` call that ran to its end lists its inner tools with
+ * their durations, and Capy commits a call that an interrupt stopped with no `calls` list at all (seen
+ * in every cancelled test turn). An entry that names its tool directly (Haiku's `bash`) never lists
+ * inner tools, so after a cancel its outcome is unknown, and it shows as failed rather than finished.
+ */
+export const toolStatus = (message: Message, cancelled: boolean): "completed" | "failed" => {
+  if ((message.calls?.length ?? 0) > 0) return "completed"
+  if (message.tool === "execute") return "failed"
+  return cancelled ? "failed" : "completed"
+}
+
 const formatSeconds = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
 
 /** Title for a committed tool entry: its summary when it has one, else the inner tools it ran. */
@@ -97,7 +113,7 @@ export const toolTitle = (message: Message): string => {
   const summary = message.text?.trim() ?? ""
   if (summary !== "") return summary
   const calls = message.calls ?? []
-  if (calls.length === 0) return message.tool ?? "Tool call"
+  if (calls.length === 0) return message.tool === "execute" ? "Stopped tool call" : (message.tool ?? "Tool call")
   const names = [...new Set(calls.map((call) => call.tool))].join(", ")
   const total = calls.reduce((sum, call) => sum + (call.durationMs ?? 0), 0)
   return total > 0 ? `${names} (${formatSeconds(total)})` : names
@@ -167,17 +183,13 @@ const onTranscript = (state: TurnState, cursor: string | undefined, message: Mes
       const names = message.calls?.map((call) => call.tool) ?? (message.tool === undefined ? [] : [message.tool])
       const title = toolTitle(message)
       const kind = toolKind(names.length > 0 ? names : [message.tool ?? ""])
+      const status = toolStatus(message, base.cancelled)
       const tools = new Map(base.tools).set(message.id, { title, kind, done: true })
       const next: TurnState = { ...base, active: true, tools }
-      if (known === undefined) {
-        return {
-          state: next,
-          updates: [{ sessionUpdate: "tool_call", toolCallId: message.id, title, kind, status: "completed" }]
-        }
-      }
+      const fields = { toolCallId: message.id, title, kind, status }
       return {
         state: next,
-        updates: [{ sessionUpdate: "tool_call_update", toolCallId: message.id, title, kind, status: "completed" }]
+        updates: [known === undefined ? { sessionUpdate: "tool_call", ...fields } : { sessionUpdate: "tool_call_update", ...fields }]
       }
     }
   }
@@ -274,14 +286,16 @@ export const changeTitle = (changes: ReadonlyArray<FileChange>): string => {
 }
 
 /**
- * The ACP update that shows a tool call's file changes as diffs. With `create`, it opens a new
- * tool call (for changes no Capy tool call can be credited with). `status` keeps a call that was
- * closed as failed (cancelled, failed run) from reading as completed.
+ * The ACP update that shows a tool call's file changes as diffs. `status` keeps a call that was closed
+ * as failed (cancelled, failed run) from reading as completed. With `outside`, it opens an item of its
+ * own for changes that no Capy tool call made: they happened while no call that can write ran, so
+ * they are the user's, or a background command's. Its kind is `other`, so that clients show the title,
+ * which says so, and not a plain "changed files".
  */
 export const fileChangeUpdate = (
   toolCallId: string,
   changes: ReadonlyArray<FileChange>,
-  options: { readonly create?: boolean; readonly status?: "completed" | "failed" } = {}
+  options: { readonly outside?: boolean; readonly status?: "completed" | "failed" } = {}
 ): SessionUpdate => {
   const content: Array<ToolCallContent> = changes.flatMap((change) =>
     change.previewable
@@ -293,22 +307,34 @@ export const fileChangeUpdate = (
         }]
       : []
   )
-  const fields = {
+  const locations = changes.map((change) => ({ path: change.path }))
+  if (options.outside === true) {
+    const title = `${changeTitle(changes)} outside a Capy tool call`
+    return { sessionUpdate: "tool_call", toolCallId, title, kind: "other", status: "completed", content, locations }
+  }
+  return {
+    sessionUpdate: "tool_call_update",
     toolCallId,
     title: changeTitle(changes),
-    kind: changes.every((c) => c.operation === "delete") ? ("delete" as const) : ("edit" as const),
+    kind: changes.every((c) => c.operation === "delete") ? "delete" : "edit",
     status: options.status ?? "completed",
     content,
-    locations: changes.map((change) => ({ path: change.path }))
+    locations
   }
-  return options.create === true ? { sessionUpdate: "tool_call", ...fields } : { sessionUpdate: "tool_call_update", ...fields }
 }
 
-/** Ids of tool calls an update set closes, in order. */
-export const closedTools = (updates: ReadonlyArray<SessionUpdate>): ReadonlyArray<string> =>
+export interface ClosedTool {
+  readonly toolCallId: string
+  readonly status: Extract<ToolCallStatus, "completed" | "failed">
+  /** Set when the update names it; subagent updates carry the status only. */
+  readonly kind: ToolKind | undefined
+}
+
+/** The tool calls an update set closes, in order. */
+export const closedTools = (updates: ReadonlyArray<SessionUpdate>): ReadonlyArray<ClosedTool> =>
   updates.flatMap((u) =>
     (u.sessionUpdate === "tool_call" || u.sessionUpdate === "tool_call_update") && (u.status === "completed" || u.status === "failed")
-      ? [u.toolCallId]
+      ? [{ toolCallId: u.toolCallId, status: u.status, kind: u.kind ?? undefined }]
       : []
   )
 
@@ -339,7 +365,7 @@ export const history = (messages: ReadonlyArray<Message>): ReadonlyArray<{ reado
       const names = message.calls?.map((call) => call.tool) ?? (message.tool === undefined ? [] : [message.tool])
       out.push({
         source: "assistant",
-        update: { sessionUpdate: "tool_call", toolCallId: message.id, title: toolTitle(message), kind: toolKind(names), status: "completed" }
+        update: { sessionUpdate: "tool_call", toolCallId: message.id, title: toolTitle(message), kind: toolKind(names), status: toolStatus(message, false) }
       })
     } else if (message.source === "user") {
       out.push({ source: "user", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text } }, ...withFiles })

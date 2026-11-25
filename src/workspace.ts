@@ -1,9 +1,10 @@
 /**
- * Session mapper: the folder an ACP client opens → git remote → Capy project → device workspace.
+ * Session mapper: the folder an ACP client opens, then its git remotes, then a Capy project, then a device workspace.
  *
- * The device id and linked folders are read from the files Capy keeps on this machine (desktop app or
- * `capy dock`), read only. Capy owns those files (it rewrites them from server state), and the API has no
- * endpoint to list devices or link folders, so reading them is the only way to target this machine.
+ * The device id comes from the files Capy keeps on this machine (desktop app or `capy dock`), read only: the
+ * API has no endpoint that lists devices. The list of linked folders comes from there too, but only as a
+ * hint. Capy itself checks the folder when the thread starts, so a list that is old, moved or unreadable
+ * costs at most one refused thread create, which the reply turns into the fix.
  */
 import { execFile } from "node:child_process"
 import { readFile, realpath } from "node:fs/promises"
@@ -47,42 +48,64 @@ export interface ResolvedWorkspace {
   readonly workspace: DeviceWorkspace
   /** Shown to the user once, in the first reply, when the thread will not edit the open folder. */
   readonly note: string | undefined
+  /** What to do if Capy refuses the linked root: how to link the folder. */
+  readonly linkFix: string
 }
 
 export type Resolution =
   | { readonly _tag: "Resolved"; readonly value: ResolvedWorkspace }
   | { readonly _tag: "Unresolved"; readonly message: string }
 
-/** `owner/repo` from an https or ssh GitHub remote, lowercased for matching. */
+/**
+ * `owner/repo` from a remote URL, lowercased for matching. Any host name counts, because ssh configs often
+ * give github.com another name (`git@github-work:acme/app.git`). Only repositories of the user's Capy
+ * projects can match, and Capy works only with GitHub.com.
+ */
 export const parseRemote = (url: string): string | undefined => {
-  const match = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim())
-  return match ? `${match[1]}/${match[2]}`.toLowerCase() : undefined
+  const trimmed = url.trim()
+  // `scheme://host/path`, or scp style `user@host:path`.
+  const path = /^[a-z][a-z0-9+.-]*:\/\/[^/]*\/(.*)$/i.exec(trimmed)?.[1] ?? /^[^/:\s]+:(?!\/\/)(.*)$/.exec(trimmed)?.[1]
+  const parts = path?.replace(/\/+$/, "").replace(/\.git$/i, "").split("/").filter((part) => part !== "")
+  return parts !== undefined && parts.length >= 2 ? parts.slice(-2).join("/").toLowerCase() : undefined
 }
 
 export const resolveWorkspace = (input: {
   readonly cwd: string
   readonly gitRoot: string | undefined
-  readonly repo: string | undefined
+  /** `owner/repo` of each git remote, `origin` first. */
+  readonly repos: ReadonlyArray<string>
   readonly linked: ReadonlyArray<LinkedFolder>
   readonly projects: ReadonlyArray<ProjectSummary>
   readonly mode: AdapterConfig["workspaceMode"]
   readonly allowWorktreeFallback: boolean
+  readonly platform?: NodeJS.Platform
 }): Resolution => {
   const unresolved = (message: string): Resolution => ({ _tag: "Unresolved", message })
-  if (input.gitRoot === undefined || input.repo === undefined) {
-    return unresolved(
-      `${input.cwd} is not a clone of a GitHub repository (no "origin" remote). ` +
-        "capy-acp runs Capy threads on a repository that belongs to a Capy project."
-    )
+  if (input.gitRoot === undefined) {
+    return unresolved(`${input.cwd} is not in a git repository. capy-acp runs Capy threads on a repository that belongs to a Capy project.`)
   }
-  const repo = input.repo
-  const project = input.projects.find((p) => p.repos.some((r) => r.repoFullName.toLowerCase() === repo))
-  if (project === undefined) {
-    return unresolved(`No Capy project includes ${repo}. Add the repository to a project at https://capy.ai, then retry.`)
-  }
-  const base = { projectId: project.id, projectName: project.name, repo }
   const gitRoot = input.gitRoot
   const here = input.linked.find((folder) => samePath(folder.realRoot ?? folder.root, gitRoot) || samePath(folder.root, gitRoot))
+  // A linked folder lists its repositories, so a clone whose remotes name none of them still matches.
+  const candidates = [...new Set([...input.repos, ...(here?.repos ?? []).map((r) => r.toLowerCase())])]
+  const matches = (repo: string) => input.projects.find((p) => p.repos.some((r) => r.repoFullName.toLowerCase() === repo))
+  const repo = candidates.find((candidate) => matches(candidate) !== undefined)
+  const project = repo === undefined ? undefined : matches(repo)
+  if (repo === undefined || project === undefined) {
+    if (candidates.length === 0) {
+      return unresolved(
+        `${gitRoot} has no git remote that names a GitHub repository. capy-acp runs Capy threads on a repository that belongs to a Capy project.`
+      )
+    }
+    return unresolved(`No Capy project includes ${candidates.join(" or ")}. Add the repository to a project at https://capy.ai, then retry.`)
+  }
+  const sameRepo = input.linked.find((folder) => folder !== here && folder.repos.some((r) => r.toLowerCase() === repo))
+  const linkFix =
+    `Link ${gitRoot} to this device in Capy: open https://capy.ai/settings/projects, choose "${project.name}", ` +
+    "and add the folder under Project folders (or use Scan a folder in the Capy desktop app, or run `capy dock dirs add` " +
+    "on a machine paired with capy dock). Then send your message again." +
+    (sameRepo === undefined ? "" : ` Or set CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1 to work in a worktree of ${sameRepo.root} instead.`)
+  const base = { projectId: project.id, projectName: project.name, repo, linkFix }
   if (here !== undefined) {
     return input.mode === "linked"
       ? { _tag: "Resolved", value: { ...base, workspace: { kind: "linked", root: here.root }, note: undefined } }
@@ -95,7 +118,6 @@ export const resolveWorkspace = (input: {
           }
         }
   }
-  const sameRepo = input.linked.find((folder) => folder.repos.some((r) => r.toLowerCase() === repo))
   if (sameRepo !== undefined && input.allowWorktreeFallback) {
     return {
       _tag: "Resolved",
@@ -108,15 +130,15 @@ export const resolveWorkspace = (input: {
       }
     }
   }
-  const fix =
-    `Link ${input.gitRoot} to this device in Capy: open https://capy.ai/settings/projects, choose "${project.name}", ` +
-    "and add the folder under Project folders (or use Scan a folder in the Capy desktop app, or run `capy dock dirs add` " +
-    "on a machine paired with capy dock). Then send your message again."
-  const fallback =
-    sameRepo === undefined
-      ? ""
-      : ` Or set CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1 to work in a worktree of ${sameRepo.root} instead.`
-  return unresolved(`${input.gitRoot} is not a linked folder on this Capy device. ${fix}${fallback}`)
+  if (input.mode === "worktree") {
+    // A worktree is made from a linked folder of the repository, and none is known.
+    return unresolved(`${gitRoot} is not a linked folder on this Capy device. ${linkFix}`)
+  }
+  // Not in the local list, which can be older than Capy's own, or unreadable. Capy checks the root when
+  // the thread starts and refuses one it does not link; the reply then gives `linkFix`. Git prints
+  // Windows paths with forward slashes, so the root goes in the form Windows gives it.
+  const root = (input.platform ?? process.platform) === "win32" ? win32.normalize(gitRoot) : gitRoot
+  return { _tag: "Resolved", value: { ...base, workspace: { kind: "linked", root }, note: undefined } }
 }
 
 const readJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"))
@@ -171,7 +193,7 @@ export const readLinkedFolders = async (config: AdapterConfig): Promise<Readonly
   }
 }
 
-export const readGit = async (cwd: string): Promise<{ gitRoot: string | undefined; repo: string | undefined }> => {
+export const readGit = async (cwd: string): Promise<{ gitRoot: string | undefined; repos: ReadonlyArray<string> }> => {
   const git = async (...args: Array<string>) => {
     try {
       return (await run("git", ["-C", cwd, ...args], { timeout: 5_000 })).stdout.trim()
@@ -180,6 +202,12 @@ export const readGit = async (cwd: string): Promise<{ gitRoot: string | undefine
     }
   }
   const gitRoot = await git("rev-parse", "--show-toplevel")
-  const remote = gitRoot === undefined ? undefined : await git("remote", "get-url", "origin")
-  return { gitRoot, repo: remote === undefined ? undefined : parseRemote(remote) }
+  // `git remote -v` prints URLs after `insteadOf` rewrites: "<name>\t<url> (fetch)".
+  const remotes = gitRoot === undefined ? [] : ((await git("remote", "-v")) ?? "").split("\n").flatMap((line) => {
+    const match = /^(\S+)\s+(\S+)\s+\(fetch\)$/.exec(line.trim())
+    return match ? [{ name: match[1]!, url: match[2]! }] : []
+  })
+  const ordered = [...remotes.filter((r) => r.name === "origin"), ...remotes.filter((r) => r.name !== "origin")]
+  const repos = [...new Set(ordered.flatMap((remote) => parseRemote(remote.url) ?? []))]
+  return { gitRoot, repos }
 }

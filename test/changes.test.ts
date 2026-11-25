@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { type FileChange, makeChangeTracker, MAX_PREVIEW_BYTES, mergeChanges } from "../src/changes.js"
+import { type FileChange, makeChangeTracker, makeWorktreeTracker, MAX_PREVIEW_BYTES } from "../src/changes.js"
 
 const roots: Array<string> = []
 afterEach(() => {
@@ -168,28 +168,43 @@ describe("change tracker", () => {
     }))
 })
 
-describe("mergeChanges", () => {
-  const change = (operation: FileChange["operation"], oldText?: string, newText?: string): FileChange => ({
-    path: "/r/a.md",
-    relativePath: "a.md",
-    operation,
-    previewable: true,
-    ...(oldText === undefined ? {} : { oldText }),
-    ...(newText === undefined ? {} : { newText })
-  })
+describe("worktree tracker", () => {
+  /** A Capy home whose thread jam_T has a worktree of acme/app, next to another folder. */
+  const capyHome = () => {
+    const home = mkdtempSync(join(tmpdir(), "capy-acp-home-"))
+    roots.push(home)
+    const thread = join(home, "worktrees", "jam_T")
+    mkdirSync(join(thread, "other"), { recursive: true })
+    writeFileSync(join(thread, ".capy-managed.json"), "{}")
+    const root = repo()
+    const worktree = join(thread, "app")
+    execFileSync("git", ["clone", "-q", root, worktree], { stdio: "pipe" })
+    git(worktree, "config", "core.autocrlf", "false")
+    return { home, worktree }
+  }
 
-  it("keeps the first before and the last after", () => {
-    expect(mergeChanges([change("modify", "1", "2")], [change("modify", "2", "3")])).toEqual([change("modify", "1", "3")])
-    expect(mergeChanges([change("add", undefined, "1")], [change("modify", "1", "2")])).toEqual([change("add", undefined, "2")])
-    expect(mergeChanges([change("modify", "1", "2")], [change("delete", "2")])).toEqual([change("delete", "1")])
-  })
+  it.effect("shows nothing until the thread exists, then credits all of a new worktree's edits", () =>
+    Effect.gen(function*() {
+      const { home, worktree } = capyHome()
+      let threadId: string | undefined
+      const tracker = makeWorktreeTracker(home, "acme/app", () => threadId)
+      yield* tracker.baseline
+      writeFileSync(join(worktree, "README.md"), "# demo\nedited\n")
+      expect(yield* tracker.collect).toEqual([])
+      threadId = "jam_T"
+      expect(yield* tracker.collect).toMatchObject([
+        { path: join(worktree, "README.md"), operation: "modify", oldText: "# demo\n", newText: "# demo\nedited\n" }
+      ])
+      expect(yield* tracker.collect).toEqual([])
+    }))
 
-  it("drops a file created and deleted within the turn", () => {
-    expect(mergeChanges([change("add", undefined, "1")], [change("delete", "1")])).toEqual([])
-  })
-
-  it("adds files it has not seen", () => {
-    const other = { ...change("add", undefined, "x"), path: "/r/b.md", relativePath: "b.md" }
-    expect(mergeChanges([change("modify", "1", "2")], [other])).toEqual([change("modify", "1", "2"), other])
-  })
+  it.effect("takes a normal baseline when the worktree is there when the turn starts", () =>
+    Effect.gen(function*() {
+      const { home, worktree } = capyHome()
+      writeFileSync(join(worktree, "README.md"), "# demo\nfrom the last turn\n")
+      const tracker = makeWorktreeTracker(home, "acme/app", () => "jam_T")
+      yield* tracker.baseline
+      writeFileSync(join(worktree, "src", "app.ts"), "export const a = 2\n")
+      expect((yield* tracker.collect).map((c) => c.relativePath)).toEqual(["src/app.ts"])
+    }))
 })

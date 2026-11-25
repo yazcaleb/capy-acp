@@ -1,19 +1,18 @@
 /**
- * Observes what a Capy thread changes in a linked folder, so ACP clients can show real diffs.
+ * Observes what a Capy thread changes on disk, so ACP clients can show real diffs.
  *
  * Capy's stream names the tools a call ran but never the files or their contents (docs/capy-api-notes.md, API
- * gap 4). In linked mode the thread edits the folder the client has open, so the adapter can see
- * the changes itself: it records the working tree when a turn starts, then diffs it after each
- * tool call. Strictly read only: `git status`, `git rev-parse`, `git diff --name-only`,
- * `git cat-file` and plain file reads. Git LFS smudging is skipped, so a diff never downloads.
+ * gap 4). The thread works on this machine, in the folder the client has open (linked mode) or in its
+ * own git worktree, so the adapter can see the changes itself: it records the working tree when a turn
+ * starts, then diffs it as tool calls start and finish. Strictly read only: `git status`, `git rev-parse`,
+ * `git diff --name-only`, `git cat-file`, directory listings and plain file reads. Git LFS smudging is
+ * skipped, so a diff never downloads.
  *
- * Attribution is by time: a change is credited to the tool call that just finished. Edits the
- * user makes in the same folder during a turn are credited the same way; that is the honest limit
- * of observing from outside.
+ * Attribution is by time (see turn.ts): a change is credited to the tool call that ran when it happened.
  */
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import { lstat, readFile, readlink } from "node:fs/promises"
+import { lstat, readdir, readFile, readlink } from "node:fs/promises"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import { Effect } from "effect"
@@ -89,7 +88,11 @@ class Unreadable {
   constructor(readonly path: string) {}
 }
 
-export const makeChangeTracker = (root: string, onError: (message: string) => void = () => {}): ChangeTracker => {
+export const makeChangeTracker = (root: string, onError: (message: string) => void = () => {}): ChangeTracker =>
+  trackFolder(root, onError)
+
+/** A folder tracker, plus `fromHead`: a baseline for a folder known to have been clean at its HEAD. */
+const trackFolder = (root: string, onError: (message: string) => void): ChangeTracker & { readonly fromHead: Effect.Effect<void> } => {
   let head: string | undefined
   let known = new Map<string, Content | undefined>()
   /** Set when a baseline could not be taken; the turn then reports no changes rather than wrong ones. */
@@ -183,6 +186,12 @@ export const makeChangeTracker = (root: string, onError: (message: string) => vo
     )
   )
 
+  const fromHead = Effect.gen(function*() {
+    disabled = false
+    head = yield* readHead
+    known = new Map()
+  })
+
   const collect = Effect.gen(function*() {
     if (disabled) return []
     const nextHead = yield* readHead
@@ -214,7 +223,53 @@ export const makeChangeTracker = (root: string, onError: (message: string) => vo
     )
   )
 
-  return { baseline, collect }
+  return { baseline, collect, fromHead }
+}
+
+/**
+ * Tracks the git worktree that Capy makes for a thread in worktree mode: `<capyHome>/worktrees/<threadId>/<folder>`,
+ * where the folder is the repository name (seen with the desktop app and `capy dock`). The API does not say
+ * where a thread works (API gap 2), so the worktree is found by that path once the thread exists. Capy makes
+ * it clean at the base commit for the thread's first message, so a worktree found during a turn starts from
+ * its HEAD. If the folder is not there, the turn shows no diffs, as before.
+ */
+export const makeWorktreeTracker = (
+  capyHome: string,
+  repo: string,
+  threadId: () => string | undefined,
+  onError: (message: string) => void = () => {}
+): ChangeTracker => {
+  let folder: ReturnType<typeof trackFolder> | undefined
+
+  const find = Effect.promise(async () => {
+    const id = threadId()
+    if (id === undefined) return undefined
+    const dir = join(capyHome, "worktrees", id)
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+    const names = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name)
+    const name = repo.split("/").at(-1)?.toLowerCase()
+    const match = names.find((n) => n.toLowerCase() === name) ?? (names.length === 1 ? names[0] : undefined)
+    return match === undefined ? undefined : join(dir, match)
+  })
+
+  return {
+    baseline: Effect.gen(function*() {
+      if (folder !== undefined) return yield* folder.baseline
+      const root = yield* find
+      if (root === undefined) return
+      folder = trackFolder(root, onError)
+      yield* folder.baseline
+    }),
+    collect: Effect.gen(function*() {
+      if (folder === undefined) {
+        const root = yield* find
+        if (root === undefined) return []
+        folder = trackFolder(root, onError)
+        yield* folder.fromHead
+      }
+      return yield* folder.collect
+    })
+  }
 }
 
 const describe = (error: unknown) => (error instanceof Error ? error.message.split("\n")[0] : String(error))
@@ -230,37 +285,4 @@ const toChange = (root: string, relativePath: string, before: Content | undefine
     ...(previewable && before?.text !== undefined ? { oldText: before.text } : {}),
     ...(previewable && after?.text !== undefined ? { newText: after.text } : {})
   }
-}
-
-/**
- * Folds later changes into earlier ones per path: the first `before` and the last `after` win.
- * Used when changes found at the end of a turn join a tool call that already reported some,
- * because an ACP `content` update replaces the previous content rather than appending to it.
- */
-export const mergeChanges = (earlier: ReadonlyArray<FileChange>, later: ReadonlyArray<FileChange>): ReadonlyArray<FileChange> => {
-  const byPath = new Map(earlier.map((change) => [change.path, change]))
-  for (const change of later) {
-    const first = byPath.get(change.path)
-    if (first === undefined) {
-      byPath.set(change.path, change)
-      continue
-    }
-    const existedBefore = first.operation !== "add"
-    const existsAfter = change.operation !== "delete"
-    if (!existedBefore && !existsAfter) {
-      // Created and deleted within the same turn: nothing left to show.
-      byPath.delete(change.path)
-      continue
-    }
-    const previewable = first.previewable && change.previewable
-    byPath.set(change.path, {
-      path: change.path,
-      relativePath: change.relativePath,
-      operation: !existedBefore ? "add" : !existsAfter ? "delete" : "modify",
-      previewable,
-      ...(previewable && first.oldText !== undefined ? { oldText: first.oldText } : {}),
-      ...(previewable && change.newText !== undefined ? { newText: change.newText } : {})
-    })
-  }
-  return [...byPath.values()]
 }

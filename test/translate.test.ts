@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import type { Message } from "../src/capy/events.js"
 import type { FileChange } from "../src/changes.js"
-import { changeTitle, closedTools, fileChangeUpdate, finishTools, history, initialTurn, replay, step as stepAll, toolKind, toolTitle } from "../src/translate.js"
+import { changeTitle, closedTools, fileChangeUpdate, finishTools, history, initialTurn, replay, toolStatus, step as stepAll, toolKind, toolTitle } from "../src/translate.js"
 import { loadEvents, loadJson, readText, scenarios } from "./fixtures.js"
 
 const messageText = (updates: ReadonlyArray<SessionUpdate>) =>
@@ -85,7 +85,7 @@ describe("translator replays recorded Capy streams", () => {
       { _tag: "Transcript", cursor: "1", message: entry }
     ])
     expect(updates.map((u) => u.sessionUpdate)).toEqual(["tool_call", "tool_call_update"])
-    expect(closedTools(updates)).toEqual(["c1"])
+    expect(closedTools(updates)).toEqual([{ toolCallId: "c1", status: "completed", kind: "other" }])
   })
 
   it("keeps a partial reply streamed before an interrupt, and leaves ending to the runner", () => {
@@ -174,9 +174,57 @@ describe("file change updates", () => {
     })
   })
 
-  it("opens a tool call of its own when no Capy call can be credited, and marks pure deletions", () => {
-    const update = fileChangeUpdate("x", [change("gone.md", "delete", { oldText: "old\n" })], { create: true })
-    expect(update).toMatchObject({ sessionUpdate: "tool_call", kind: "delete", status: "completed", title: "Deleted gone.md" })
+  it("marks pure deletions", () => {
+    const update = fileChangeUpdate("c1", [change("gone.md", "delete", { oldText: "old\n" })])
+    expect(update).toMatchObject({ sessionUpdate: "tool_call_update", kind: "delete", status: "completed", title: "Deleted gone.md" })
+  })
+
+  it("opens an item of its own for changes no Capy tool call made, and says so in the title", () => {
+    const update = fileChangeUpdate("x", [change("notes.md", "modify", { oldText: "a\n", newText: "b\n" })], { outside: true })
+    expect(update).toMatchObject({
+      sessionUpdate: "tool_call",
+      toolCallId: "x",
+      kind: "other",
+      status: "completed",
+      title: "Edited notes.md outside a Capy tool call",
+      content: [{ type: "diff", path: "/repo/notes.md", oldText: "a\n", newText: "b\n" }]
+    })
+  })
+})
+
+describe("tool outcomes", () => {
+  const execute = (calls?: Array<{ tool: string; durationMs?: number }>) => ({
+    id: "c1",
+    source: "tool" as const,
+    tool: "execute",
+    text: "",
+    ...(calls === undefined ? {} : { calls })
+  })
+
+  it("tells a call an interrupt stopped from one that finished: only a finished call lists its inner tools", () => {
+    // As committed in every cancelled test turn on Linux, macOS and Windows (November 2026).
+    expect(toolStatus(execute(), true)).toBe("failed")
+    expect(toolStatus(execute([{ tool: "bash", durationMs: 1439 }]), true)).toBe("completed")
+    expect(toolStatus(execute(), false)).toBe("failed")
+  })
+
+  it("shows a direct tool entry as failed after a cancel, because its outcome is unknown", () => {
+    const bash = { id: "c1", source: "tool" as const, tool: "bash", text: "Ran ls" }
+    expect(toolStatus(bash, false)).toBe("completed")
+    expect(toolStatus(bash, true)).toBe("failed")
+  })
+
+  it("keeps a call that finished just before a cancel as completed", () => {
+    const { updates } = replay([
+      { _tag: "ToolCall", callId: "c1", name: "execute", text: "" },
+      { _tag: "ToolCall", callId: "c2", name: "execute", text: "" },
+      { _tag: "Transcript", cursor: "1", message: execute([{ tool: "bash", durationMs: 300 }]) },
+      { _tag: "Transcript", cursor: "2", message: { ...execute(), id: "c2" } }
+    ])
+    expect(closedTools(updates)).toEqual([
+      { toolCallId: "c1", status: "completed", kind: "other" },
+      { toolCallId: "c2", status: "failed", kind: "other" }
+    ])
   })
 })
 
@@ -256,3 +304,10 @@ describe("history", () => {
     ])
   })
 })
+
+  it("replays a call an interrupt stopped as failed", () => {
+    const stopped: Message = { id: "t1", source: "tool", tool: "execute", text: "" }
+    expect(history([stopped]).map((h) => h.update)).toEqual([
+      { sessionUpdate: "tool_call", toolCallId: "t1", title: "Stopped tool call", kind: "other", status: "failed" }
+    ])
+  })

@@ -9,7 +9,7 @@ import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Layer, Stream } from "effect"
 import { makeAgent } from "../src/agent.js"
-import { CapyClient, CapyConfigError, type CreateThread, type SendMessage } from "../src/capy/client.js"
+import { CapyApiError, CapyClient, CapyConfigError, type CreateThread, type SendMessage } from "../src/capy/client.js"
 import type { CapyEvent, Message } from "../src/capy/events.js"
 import { readConfig } from "../src/config.js"
 
@@ -19,7 +19,7 @@ afterEach(() => {
 })
 
 /** A linked clone of acme/app, a fake Capy home that links it, and an empty state directory. */
-const machine = () => {
+const machine = (env: Record<string, string> = {}) => {
   const home = mkdtempSync(join(tmpdir(), "capy-acp-agent-"))
   dirs.push(home)
   const repo = join(home, "app")
@@ -34,7 +34,8 @@ const machine = () => {
     CAPY_ACP_STATE_DIR: join(home, "state"),
     CAPY_ACP_ATTACHMENTS_DIR: join(home, "attachments"),
     CAPY_DESKTOP_CONFIG_DIR: join(home, "nowhere"),
-    CAPY_API_KEY_FILE: join(home, "api-key")
+    CAPY_API_KEY_FILE: join(home, "api-key"),
+    ...env
   })
   return { repo, config, home }
 }
@@ -210,6 +211,61 @@ describe("agent sessions", () => {
     key = true
     await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })
     expect(log.creates).toHaveLength(1)
+    await client.close()
+  })
+
+  it("lets Capy check a folder that the local list does not show, and gives the fix when Capy refuses it", async () => {
+    const { repo, config, home } = machine()
+    writeFileSync(join(home, "capy", "device", "workspaces.json"), JSON.stringify({ folders: [] }))
+    const log: Log = { creates: [], sends: [], streams: [] }
+    let linked = false
+    const client = await connect(
+      config,
+      fakeCapy(log, [turn("01A", "hi")], {
+        createThread: (body) =>
+          linked
+            ? Effect.sync(() => (log.creates.push(body), { id: "jam_TEST", status: "working" as const }))
+            : Effect.fail(new CapyApiError({ status: 400, tag: "capy/InvalidRequest", message: `This device does not link a folder at ${repo}`, retryAfterMs: undefined }))
+      })
+    )
+    const { sessionId } = await client.agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })
+    await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })
+    const reply = client.updates.flatMap((u) => (u.sessionUpdate === "agent_message_chunk" && u.content.type === "text" ? [u.content.text] : [])).join("")
+    expect(reply).toContain(`Capy says this device does not link ${repo}.`)
+    expect(reply).toContain("https://capy.ai/settings/projects")
+    // The user links the folder in Capy; the local list stays empty.
+    linked = true
+    await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })
+    expect(log.creates.map((c) => c.device)).toEqual([{ deviceId: "device_TEST", workspace: { kind: "linked", root: repo } }])
+    await client.close()
+  })
+
+  it("shows the diffs of Capy's own worktree in worktree mode", async () => {
+    const { repo, config, home } = machine({ CAPY_ACP_WORKSPACE: "worktree" })
+    // Capy made the thread's worktree at the base commit, and its first call edited README.md.
+    const worktree = join(home, "capy", "worktrees", "jam_TEST", "app")
+    mkdirSync(worktree, { recursive: true })
+    const git = (...args: Array<string>) => execFileSync("git", ["-C", worktree, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.autocrlf=false", ...args])
+    git("init", "-q")
+    writeFileSync(join(worktree, "README.md"), "a\n")
+    git("add", "README.md")
+    git("commit", "-q", "-m", "base")
+    writeFileSync(join(worktree, "README.md"), "b\n")
+    const log: Log = { creates: [], sends: [], streams: [] }
+    const events: Array<CapyEvent> = [
+      { _tag: "Status", status: "working" },
+      { _tag: "ToolCall", callId: "c1", name: "execute", text: "" },
+      { _tag: "Transcript", cursor: "01M84P0000000000000000001U", message: { id: "01M84P0000000000000000001U", source: "user", text: "edit" } },
+      { _tag: "Transcript", cursor: "01M84P0000000000000000001T", message: { id: "c1", source: "tool", tool: "execute", calls: [{ tool: "write", durationMs: 50 }] } },
+      { _tag: "Status", status: "idle" }
+    ]
+    const client = await connect(config, fakeCapy(log, [events]))
+    const { sessionId } = await client.agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })
+    await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "edit" }] })
+    expect(log.creates.map((c) => c.device?.workspace)).toEqual([{ kind: "worktree" }])
+    expect(client.updates.filter((u) => u.sessionUpdate === "tool_call_update" && u.kind === "edit")).toMatchObject([
+      { toolCallId: "c1", title: "Edited README.md", content: [{ type: "diff", path: join(worktree, "README.md"), oldText: "a\n", newText: "b\n" }] }
+    ])
     await client.close()
   })
 

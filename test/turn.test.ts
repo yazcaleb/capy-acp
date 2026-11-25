@@ -101,12 +101,12 @@ describe("runTurn in linked mode", () => {
       // Recorded run: tool 1 ran `pwd` and read README.md (no changes), tool 2 wrote both files.
       const { result, updates } = yield* run({
         events: recorded("opus", "s2-edit-linked"),
-        changes: fakeTracker([[], [readme, spike]], calls),
+        changes: fakeTracker([[], [], [], [readme, spike]], calls),
         calls
       })
       expect(result).toMatchObject({ threadId: "jam_test", stopReason: "end_turn" })
-      // Baseline before the thread exists; one look per finished tool call, and a last one at the end.
-      expect(calls).toEqual(["baseline", "create linked", "collect", "collect", "collect"])
+      // Baseline before the thread exists; a look as each tool call starts and finishes, and a last one at the end.
+      expect(calls).toEqual(["baseline", "create linked", "collect", "collect", "collect", "collect", "collect"])
 
       const tools = updates.filter((u) => u.sessionUpdate === "tool_call" || u.sessionUpdate === "tool_call_update")
       const diffs = tools.filter((u) => u.kind === "edit")
@@ -129,27 +129,36 @@ describe("runTurn in linked mode", () => {
       expect(updates.slice(completedSecond + 2).some((u) => u.sessionUpdate === "agent_message_chunk")).toBe(true)
     }))
 
-  it.effect("credits changes found only at the end to the latest tool call, merged with what it showed", () =>
+  it.effect("shows changes made while no Capy call ran on an item of their own, ahead of the next call", () =>
     Effect.gen(function*() {
       const calls: Array<string> = []
-      const later: FileChange = { ...readme, oldText: readme.newText!, newText: `${readme.newText}more\n` }
-      const { updates } = yield* run({
-        events: recorded("opus", "s2-edit-linked"),
-        changes: fakeTracker([[], [readme], [later, spike]], calls),
-        calls
-      })
-      const diffs = updates.filter((u) => u.sessionUpdate === "tool_call_update" && u.kind === "edit")
-      expect(diffs).toHaveLength(2)
-      expect(diffs[1]).toMatchObject({
-        toolCallId: (diffs[0] as { toolCallId: string }).toolCallId,
-        content: [
-          { type: "diff", path: readme.path, oldText: readme.oldText, newText: later.newText },
-          { type: "diff", path: spike.path, newText: spike.newText }
-        ]
-      })
+      // The user edits README.md before Capy's first call starts; the second call writes docs/SPIKE.md.
+      const { updates } = yield* run({ events: recorded("opus", "s2-edit-linked"), changes: fakeTracker([[readme], [], [], [spike]], calls), calls })
+      const tools = updates.filter(isTool)
+      expect(tools[0]).toMatchObject({ sessionUpdate: "tool_call", kind: "other", title: "Edited README.md outside a Capy tool call" })
+      expect(tools[1]).toMatchObject({ sessionUpdate: "tool_call", status: "in_progress" })
+      expect(tools.filter((u) => u.kind === "edit")).toMatchObject([{ title: "Created docs/SPIKE.md" }])
     }))
 
-  it.effect("gives edits with no tool call to credit a tool call of their own", () =>
+  it.effect("does not credit changes to a call that only reads", () =>
+    Effect.gen(function*() {
+      const calls: Array<string> = []
+      const { updates } = yield* run({
+        events: [
+          { _tag: "Status", status: "working" },
+          { _tag: "ToolCall", callId: "c1", name: "execute", text: "" },
+          { _tag: "Transcript", cursor: "01M84K0HA45PN2H6STSA7EK03B", message: { id: "c1", source: "tool", tool: "execute", calls: [{ tool: "read", durationMs: 30 }] } },
+          { _tag: "Status", status: "idle" }
+        ],
+        changes: fakeTracker([[], [readme]], calls),
+        calls
+      })
+      const tools = updates.filter(isTool)
+      expect(tools.filter((u) => u.toolCallId === "c1").map((u) => u.kind)).toEqual(["other", "read"])
+      expect(tools.at(-1)).toMatchObject({ sessionUpdate: "tool_call", kind: "other", title: "Edited README.md outside a Capy tool call" })
+    }))
+
+  it.effect("shows edits when Capy ran no tool call as not Capy's", () =>
     Effect.gen(function*() {
       const calls: Array<string> = []
       // Keep the replies, drop every tool frame.
@@ -159,7 +168,7 @@ describe("runTurn in linked mode", () => {
       const { updates } = yield* run({ events, changes: fakeTracker([[spike]], calls), calls })
       expect(calls).toEqual(["baseline", "create linked", "collect"])
       expect(updates.filter((u) => u.sessionUpdate === "tool_call")).toMatchObject([
-        { kind: "edit", status: "completed", title: "Created docs/SPIKE.md" }
+        { kind: "other", status: "completed", title: "Created docs/SPIKE.md outside a Capy tool call" }
       ])
     }))
 
@@ -172,7 +181,7 @@ describe("runTurn in linked mode", () => {
           { _tag: "ToolCall", callId: "c1", name: "execute", text: "" },
           { _tag: "Status", status: "failed" }
         ],
-        changes: fakeTracker([[spike]], calls),
+        changes: fakeTracker([[], [spike]], calls),
         calls
       })
       const forC1 = updates.filter(isTool).filter((u) => u.toolCallId === "c1")

@@ -7,11 +7,11 @@ import { existsSync } from "node:fs"
 import { mkdir, writeFile } from "node:fs/promises"
 import { basename, isAbsolute, join } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { ContentBlock, SessionUpdate, StopReason } from "@agentclientprotocol/sdk"
+import type { ContentBlock, SessionUpdate, StopReason, ToolKind } from "@agentclientprotocol/sdk"
 import { Duration, Effect, Option, Result, Stream } from "effect"
 import { CapyClient, type CapyError, CapyTransportError, describeError, type FileUpload, isTransient, type MessageFile, type ModelSelection } from "./capy/client.js"
 import type { MessageAttachment } from "./capy/events.js"
-import { type ChangeTracker, type FileChange, mergeChanges } from "./changes.js"
+import type { ChangeTracker, FileChange } from "./changes.js"
 import type { DeviceWorkspace } from "./workspace.js"
 import { closedTools, fileChangeUpdate, finishTools, initialTurn, step, turnComplete, type TurnSignal, type TurnState } from "./translate.js"
 
@@ -35,7 +35,7 @@ export interface TurnInput {
   /** Resolves when the client cancels the prompt. */
   readonly cancelled: Effect.Effect<void>
   readonly emit: (update: SessionUpdate) => Effect.Effect<void>
-  /** Linked mode only: watches the open folder so file edits reach the client as diffs. */
+  /** Watches the folder the thread works in (the open folder, or Capy's worktree) so edits reach the client as diffs. */
   readonly changes?: ChangeTracker | undefined
   /** Called whenever the resume cursor advances, so a restarted adapter picks up exactly there. */
   readonly onCursor?: ((threadId: string, cursor: string) => Effect.Effect<void>) | undefined
@@ -58,10 +58,8 @@ const backoff = (attempt: number) => Duration.millis(Math.min(30_000, 250 * 2 **
 
 const chunk = (text: string): SessionUpdate => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } })
 
-const asStopped = (update: SessionUpdate): SessionUpdate =>
-  (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") && update.status === "completed"
-    ? { ...update, status: "failed" }
-    : update
+/** Kinds of calls that cannot write files: changes seen while one ran are not its doing. */
+const READ_ONLY: ReadonlySet<ToolKind | undefined> = new Set(["read", "search", "fetch", "think"])
 
 export const titleOf = (text: string) => {
   const line = text.split("\n").find((l) => l.trim() !== "")?.trim() ?? "capy-acp session"
@@ -181,29 +179,29 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
     /** Set once the client cancels; the loop keeps reading until the thread settles. */
     let cancelRequested = false
 
-    // Diffs already shown per tool call. ACP `content` replaces rather than appends, so later
-    // changes credited to the same call are merged into what it already shows.
-    const shown = new Map<string, ReadonlyArray<FileChange>>()
-    let lastTool: string | undefined
-
+    /**
+     * Shows changes on the tool call that made them. Each call is credited once, when it closes (or at the
+     * end of the turn if it never did), so its content is never replaced. Changes with no call to credit
+     * (`undefined`) get an item of their own that says they came from outside Capy's tool calls.
+     */
     const showChanges = (toolCallId: string | undefined, changes: ReadonlyArray<FileChange>, status: "completed" | "failed") => {
       if (changes.length === 0) return Effect.void
-      const id = toolCallId ?? `capy-acp-changes-${randomUUID()}`
-      const merged = mergeChanges(shown.get(id) ?? [], changes)
-      shown.set(id, merged)
-      if (merged.length === 0) return Effect.void
-      return input.emit(fileChangeUpdate(id, merged, { create: toolCallId === undefined, status }))
+      return toolCallId === undefined
+        ? input.emit(fileChangeUpdate(`capy-acp-changes-${randomUUID()}`, changes, { outside: true }))
+        : input.emit(fileChangeUpdate(toolCallId, changes, { status }))
     }
 
     const apply = (event: Parameters<typeof step>[1]): Effect.Effect<TurnSignal | undefined> =>
       Effect.gen(function*() {
         if (event._tag !== "Heartbeat") received++
         const before = state.cursor
-        const result = step(state, event)
+        const running = [...state.tools.values()].some((tool) => !tool.done)
+        const result = step(cancelRequested ? { ...state, cancelled: true } : state, event)
         state = result.state
-        // Capy commits the call it stopped for a cancel like any finished call (seen live), so a call that
-        // closes after the cancel is shown as not completed.
-        const updates = cancelRequested ? result.updates.map(asStopped) : result.updates
+        const updates = result.updates
+        // A call starts while none runs: the changes since the last look were not made by a Capy tool call.
+        const starts = updates.some((u) => u.sessionUpdate === "tool_call" && u.status === "in_progress")
+        if (starts && !running && tracker !== undefined) yield* showChanges(undefined, yield* tracker.collect, "completed")
         yield* Effect.forEach(updates, input.emit, { discard: true })
         for (const file of result.files ?? []) {
           yield* input.emit({ sessionUpdate: "agent_message_chunk", content: yield* fileLink(capy, id, file) })
@@ -211,11 +209,10 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
         if (state.cursor !== undefined && state.cursor !== before && input.onCursor !== undefined) {
           yield* input.onCursor(id, state.cursor)
         }
-        const closed = closedTools(updates)
-        if (closed.length > 0) {
-          lastTool = closed.at(-1)
-          // The call just finished, so whatever changed on disk since the last look is its doing.
-          if (tracker !== undefined) yield* showChanges(lastTool, yield* tracker.collect, cancelRequested ? "failed" : "completed")
+        const last = closedTools(updates).at(-1)
+        if (last !== undefined && tracker !== undefined) {
+          // The call just finished, so whatever changed on disk since the last look is its doing, unless it cannot write.
+          yield* showChanges(READ_ONLY.has(last.kind) ? undefined : last.toolCallId, yield* tracker.collect, last.status)
         }
         return result.signal
       })
@@ -348,10 +345,10 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
     state = closed.state
     yield* Effect.forEach(closed.updates, input.emit, { discard: true })
     // A last look catches edits from a call that never reported completing (interrupts, a final
-    // entry that lagged). They join the latest tool call, or get their own when there was none.
+    // entry that lagged). With no call left open, the edits came after the last call finished.
     if (tracker !== undefined) {
-      const stillOpen = closedTools(closed.updates).at(-1)
-      yield* showChanges(stillOpen ?? lastTool, yield* tracker.collect, stillOpen === undefined ? "completed" : closeAs)
+      const stillOpen = closedTools(closed.updates).at(-1)?.toolCallId
+      yield* showChanges(stillOpen, yield* tracker.collect, closeAs)
     }
     if (outcome === "failed") yield* input.emit(chunk("\n\nCapy reported that this run failed. The thread keeps its transcript; send another message to retry."))
     if (outcome === "archived") yield* input.emit(chunk("\n\nThe Capy thread was archived. Start a new session to continue."))

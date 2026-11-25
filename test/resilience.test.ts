@@ -178,6 +178,30 @@ describe("runTurn edge cases", () => {
       expect(toolStatuses(updates)).toEqual(["failed"])
     }))
 
+  it.effect("keeps a call that finished just before the cancel as completed", () =>
+    Effect.gen(function*() {
+      // A finished call lists its inner tools; the stopped one does not.
+      const finished: CapyEvent = {
+        _tag: "Transcript",
+        cursor: "c2",
+        message: { id: "call-1", source: "tool", tool: "execute", text: "", calls: [{ tool: "bash", durationMs: 800 }] }
+      }
+      const stopped: CapyEvent = { _tag: "Transcript", cursor: "c3", message: { id: "call-2", source: "tool", tool: "execute", text: "" } }
+      const f: Fake = newFake(
+        [
+          { events: [{ _tag: "Status", status: "working" }, userEntry] },
+          { events: [] },
+          { events: [] },
+          { events: [] },
+          { events: [finished, stopped, { _tag: "Status", status: "idle" }] }
+        ],
+        { status: () => (f.opens.length >= 5 ? "idle" : "working") }
+      )
+      const { result, updates } = yield* drive(f, { cancelled: Effect.sleep("1 second") })
+      expect(result.stopReason).toBe("cancelled")
+      expect(toolStatuses(updates)).toEqual(["completed", "failed"])
+    }))
+
   it.effect("says so when Capy never starts on the message", () =>
     Effect.gen(function*() {
       const f = newFake([])

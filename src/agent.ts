@@ -12,7 +12,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk"
 import { Cause, Deferred, Effect, Exit, type Layer, ManagedRuntime } from "effect"
 import { CapyClient, type CapyError, describeError, type Model, layer as capyLayer } from "./capy/client.js"
-import { type ChangeTracker, makeChangeTracker } from "./changes.js"
+import { type ChangeTracker, makeChangeTracker, makeWorktreeTracker } from "./changes.js"
 import type { AdapterConfig } from "./config.js"
 import { promptParts } from "./prompt.js"
 import { API_KEY_AUTH, savedApiKey } from "./setup.js"
@@ -28,7 +28,7 @@ interface Setup {
   resolved: ResolvedWorkspace | undefined
   problem: string | undefined
   deviceId: string
-  /** Set in linked mode, where Capy edits the open folder and the adapter can show the diffs. */
+  /** Watches the folder the thread works in, so the adapter can show the diffs. */
   changes: ChangeTracker | undefined
 }
 
@@ -56,10 +56,6 @@ const modelLabel = (model: Model) => (model.route === "capy" ? `${model.name} (C
 
 /** Capy's answer when a linked root is not (or no longer) linked to this device. */
 const isNotLinked = (error: CapyError) => error._tag === "CapyApiError" && /does not link a folder/i.test(error.message)
-
-const linkFix = (root: string, projectName: string) =>
-  `Link it to this device in Capy: open https://capy.ai/settings/projects, choose "${projectName}", and add ${root} under ` +
-  "Project folders (or use Scan a folder in the Capy desktop app). Then send your message again."
 
 /** The reasoning level a session really sends: its own when the model offers it, else the model's highest. */
 const effectiveReasoning = (reasoning: string, modes: ReadonlyArray<string>): string | undefined =>
@@ -149,7 +145,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
   }
 
   /** Folder → project → device workspace. Never throws: failures become the session's `problem`. */
-  const setUp = async (cwd: string): Promise<Setup> => {
+  const setUp = async (cwd: string, threadId: () => string | undefined): Promise<Setup> => {
     const [projects, deviceId, linked, git] = await Promise.allSettled([
       attempt(withCapy((capy) => capy.listProjects)),
       readDeviceId(config),
@@ -172,7 +168,9 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     })
     if (resolution._tag === "Unresolved") return { deviceId: deviceId.value, resolved: undefined, problem: resolution.message, changes: undefined }
     const workspace = resolution.value.workspace
-    const changes = workspace.kind === "linked" ? makeChangeTracker(workspace.root, (message) => log(message)) : undefined
+    const changes = workspace.kind === "linked"
+      ? makeChangeTracker(workspace.root, log)
+      : makeWorktreeTracker(config.capyHome, resolution.value.repo, threadId, log)
     return { deviceId: deviceId.value, resolved: resolution.value, problem: undefined, changes }
   }
 
@@ -188,7 +186,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     // A thread works in the folder it was created for, so a saved session keeps its own folder.
     const folder = record?.cwd ?? cwd
     if (record !== undefined && record.cwd !== cwd) log(`session ${sessionId}: client opened ${cwd}; the thread works in ${record.cwd}`)
-    const setup = await setUp(folder)
+    const setup = await setUp(folder, () => sessions.get(sessionId)?.threadId)
     const available = await loadModels().catch(() => [] as ReadonlyArray<Model>)
     const session: SessionState = {
       ...setup,
@@ -339,7 +337,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
       try {
         if (session.resolved === undefined) {
           // The user may have fixed the setup (linked the folder, added the repo) since the last try.
-          Object.assign(session, await setUp(session.cwd))
+          Object.assign(session, await setUp(session.cwd, () => session.threadId))
           if (session.resolved !== undefined) log(`session ${params.sessionId}: setup resolved on retry`)
         }
         if (Deferred.isDoneUnsafe(cancel)) return { stopReason: "cancelled" as const }
@@ -392,7 +390,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
             Object.assign(session, {
               resolved: undefined,
               changes: undefined,
-              problem: `Capy says this device does not link ${root}. ${linkFix(root, resolved.projectName)}`
+              problem: `Capy says this device does not link ${root}. ${resolved.linkFix}`
             })
             await say(`capy-acp can't run here. ${session.problem}`)
           } else {

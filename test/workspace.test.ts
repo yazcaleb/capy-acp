@@ -1,9 +1,10 @@
+import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { desktopConfigDir, readConfig } from "../src/config.js"
-import { parseRemote, readDeviceId, resolveWorkspace, samePath } from "../src/workspace.js"
+import { parseRemote, readDeviceId, readGit, resolveWorkspace, samePath } from "../src/workspace.js"
 
 const dirs: Array<string> = []
 afterEach(() => {
@@ -11,7 +12,7 @@ afterEach(() => {
 })
 
 const projects = [{ id: "project_TEST", name: "Acme", repos: [{ repoFullName: "acme/app" }] }]
-const base = { cwd: "/w/app", gitRoot: "/w/app", repo: "acme/app", projects, mode: "linked" as const, allowWorktreeFallback: false }
+const base = { cwd: "/w/app", gitRoot: "/w/app", repos: ["acme/app"], projects, mode: "linked" as const, allowWorktreeFallback: false }
 
 describe("resolveWorkspace", () => {
   it("runs a linked clone in place, sending Capy's own spelling of the root", () => {
@@ -20,10 +21,30 @@ describe("resolveWorkspace", () => {
   })
 
   it("explains each setup problem with its fix", () => {
-    expect(resolveWorkspace({ ...base, repo: undefined, linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("not a clone of a GitHub repository") })
+    expect(resolveWorkspace({ ...base, gitRoot: undefined, linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("not in a git repository") })
+    expect(resolveWorkspace({ ...base, repos: [], linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("no git remote that names a GitHub repository") })
     expect(resolveWorkspace({ ...base, projects: [], linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("No Capy project includes acme/app") })
-    const unlinked = resolveWorkspace({ ...base, linked: [{ root: "/w/other", repos: ["acme/app"] }] })
-    expect(unlinked).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1") })
+    expect(resolveWorkspace({ ...base, mode: "worktree", linked: [] })).toMatchObject({ _tag: "Unresolved", message: expect.stringContaining("not a linked folder") })
+  })
+
+  it("lets Capy check a folder that the local list does not show, with the fix ready for a refusal", () => {
+    // The list on disk can be older than Capy's, or unreadable after a Capy update.
+    const resolution = resolveWorkspace({ ...base, linked: [{ root: "/w/other", repos: ["acme/app"] }] })
+    expect(resolution).toMatchObject({
+      _tag: "Resolved",
+      value: { workspace: { kind: "linked", root: "/w/app" }, linkFix: expect.stringContaining("CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1") }
+    })
+    expect(resolveWorkspace({ ...base, linked: [] })).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "/w/app" } } })
+    // Git prints Windows paths with forward slashes.
+    const windows = resolveWorkspace({ ...base, gitRoot: "C:/Users/dev/app", linked: [], platform: "win32" })
+    expect(windows).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "C:\\Users\\dev\\app" } } })
+  })
+
+  it("finds the project through any remote, or through the repositories of the linked folder", () => {
+    const fork = resolveWorkspace({ ...base, repos: ["dev/app", "acme/app"], linked: [] })
+    expect(fork).toMatchObject({ _tag: "Resolved", value: { repo: "acme/app", projectId: "project_TEST" } })
+    const linked = resolveWorkspace({ ...base, repos: [], linked: [{ root: "/w/app", repos: ["Acme/App"] }] })
+    expect(linked).toMatchObject({ _tag: "Resolved", value: { repo: "acme/app", workspace: { kind: "linked", root: "/w/app" } } })
   })
 
   it("falls back to a worktree of another linked clone only when allowed", () => {
@@ -45,10 +66,27 @@ describe("paths across platforms", () => {
     expect(desktopConfigDir({}, "/Users/dev", "darwin")).toBe("/Users/dev/Library/Application Support/Capy")
   })
 
-  it("parses https and ssh GitHub remotes", () => {
+  it("parses https, ssh and aliased remotes", () => {
     expect(parseRemote("https://github.com/Acme/App.git")).toBe("acme/app")
+    expect(parseRemote("https://token@github.com/acme/app/")).toBe("acme/app")
     expect(parseRemote("git@github.com:acme/app")).toBe("acme/app")
-    expect(parseRemote("https://gitlab.com/acme/app.git")).toBeUndefined()
+    expect(parseRemote("git@github-work:acme/app.git")).toBe("acme/app")
+    expect(parseRemote("ssh://git@ssh.github.com:443/acme/app.git")).toBe("acme/app")
+    expect(parseRemote("/srv/git/app.git")).toBeUndefined()
+    expect(parseRemote("app")).toBeUndefined()
+  })
+})
+
+describe("readGit", () => {
+  it("lists the repository of each remote, origin first", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "capy-acp-remotes-"))
+    dirs.push(dir)
+    execFileSync("git", ["-C", dir, "init", "-q"])
+    execFileSync("git", ["-C", dir, "remote", "add", "upstream", "https://github.com/acme/app.git"])
+    execFileSync("git", ["-C", dir, "remote", "add", "origin", "git@github-work:dev/app.git"])
+    const { gitRoot, repos } = await readGit(dir)
+    expect(gitRoot).toBeDefined()
+    expect(repos).toEqual(["dev/app", "acme/app"])
   })
 })
 
