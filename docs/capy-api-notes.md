@@ -143,7 +143,11 @@ never have `calls`, so after a cancel their outcome is unknown.
 not show at all.
 
 **Cost.** `src/changes.ts` records a git baseline before each prompt and compares the folder at each tool call boundary. It
-handles CRLF, smudge filters and LFS, and still cannot tell a user's edit from Capy's while a writing call runs.
+handles CRLF, smudge filters and LFS, and still cannot tell a user's edit from Capy's while a writing call runs. This is the
+one problem in the adapter that it cannot fix by itself. Telling the writers apart needs the process that wrote each file,
+which only system-level tracing gives (root on Linux, an Apple entitlement on macOS, admin on Windows). The device's own
+`~/.capy/git-shadow` snapshots have the same blind spot. Today the only way around it is worktree mode, where the user does
+not edit the folder that Capy changes.
 
 **Proposal.** `status` and `paths` alone would remove most of this. If tool detail is private by design, `summary`,
 `exitCode` and output can stay out, or sit behind a flag.

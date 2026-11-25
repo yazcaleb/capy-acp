@@ -136,7 +136,10 @@ first three.
   setup fails, and the reply names the file. Set `CAPY_DEVICE_ID` to continue.
 - **Capy works only with repositories on GitHub.com.**
 - **If you edit a file while a Capy tool call that can write runs, the diffs show your edit as part of that call.** The adapter
-  sees only the files, not the process that changed them.
+  sees only the files, not the process that changed them. To keep your edits out of Capy's diffs, set
+  `CAPY_ACP_WORKSPACE=worktree`. Capy then works in its own git worktree, which you do not edit, and its changes stay out of
+  your folder until you merge them. The full fix needs Capy to report the files that each call changed (ask 3 in
+  [docs/capy-api-notes.md](docs/capy-api-notes.md)).
 
 ## Tests
 

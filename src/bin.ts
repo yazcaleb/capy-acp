@@ -4,6 +4,7 @@
  */
 import { resolve } from "node:path"
 import { Readable, Writable } from "node:stream"
+import { fileURLToPath } from "node:url"
 import * as acp from "@agentclientprotocol/sdk"
 import { Cause, Effect, Exit } from "effect"
 import { makeAgent } from "./agent.js"
@@ -62,7 +63,13 @@ if (command === "--doctor") {
     const body = response.ok ? ((await response.json()) as { version?: unknown }) : {}
     return typeof body.version === "string" ? body.version : undefined
   }
-  const io = { write: (text: string) => void process.stdout.write(text), listProjects, nodeVersion: process.version, latestVersion }
+  const io = {
+    write: (text: string) => void process.stdout.write(text),
+    listProjects,
+    nodeVersion: process.version,
+    latestVersion,
+    launch: { platform: process.platform, node: process.execPath, bin: fileURLToPath(import.meta.url) }
+  }
   process.exit(await runDoctor(config, resolve(rest[0] ?? "."), io))
 }
 

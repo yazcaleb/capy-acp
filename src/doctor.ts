@@ -16,6 +16,18 @@ export interface DoctorIo {
   readonly nodeVersion: string
   /** The newest capy-acp on npm, or undefined when npm cannot be reached. */
   readonly latestVersion: () => Promise<string | undefined>
+  /** How this process was started, for the agent command to give the client. */
+  readonly launch: { readonly platform: NodeJS.Platform; readonly node: string; readonly bin: string }
+}
+
+/** The agent command for an ACP client. T3 Code on Windows starts commands without a shell and refuses `npx.cmd`. */
+const agentCommand = (launch: DoctorIo["launch"]) => {
+  if (launch.platform !== "win32") return "add an agent with the command `npx` and the arguments `-y capy-acp`."
+  // A copy that npx runs lives in its cache, which npm can clear at any time.
+  const bin = /[\\/]_npx[\\/]/.test(launch.bin)
+    ? "the full path of `dist\\bin.js` in a pinned install (https://github.com/yazcaleb/capy-acp#install-without-npx)"
+    : `\`${launch.bin}\``
+  return `add an agent with the command \`${launch.node}\` and the argument ${bin}. On Windows, T3 Code does not run \`npx\`.`
 }
 
 /** True when version `a` is older than `b`. Both are plain `major.minor.patch`. */
@@ -104,7 +116,7 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
 
   io.write(
     problems === 0
-      ? "\nReady. In your ACP client, add an agent with the command `npx` and the arguments `-y capy-acp`.\n" +
+      ? `\nReady. In your ACP client, ${agentCommand(io.launch)}\n` +
           "Steps for each client: https://github.com/yazcaleb/capy-acp#setup\n"
       : `\n${problems === 1 ? "1 problem" : `${problems} problems`} to fix. Then run \`npx -y capy-acp --doctor\` again.\n`
   )

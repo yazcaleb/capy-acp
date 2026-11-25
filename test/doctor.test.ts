@@ -49,14 +49,16 @@ const doctor = async (
   folder: string,
   listProjects: DoctorIo["listProjects"] = async () => PROJECTS,
   nodeVersion = "v24.1.0",
-  latestVersion: DoctorIo["latestVersion"] = async () => AGENT_VERSION
+  latestVersion: DoctorIo["latestVersion"] = async () => AGENT_VERSION,
+  launch: DoctorIo["launch"] = { platform: "linux", node: "/usr/bin/node", bin: "/opt/capy-acp/dist/bin.js" }
 ) => {
   const output: Array<string> = []
   const code = await runDoctor(m.config, folder, {
     write: (text) => void output.push(text),
     listProjects,
     nodeVersion,
-    latestVersion
+    latestVersion,
+    launch
   })
   return { code, text: output.join("") }
 }
@@ -96,6 +98,26 @@ describe("capy-acp --doctor", () => {
     expect(newer.text).toContain(`note  capy-acp ${AGENT_VERSION}, and npm has 99.0.0. \`npx -y capy-acp@latest\` runs the newest version.`)
     const offline = await doctor(m, m.repo, undefined, undefined, () => Promise.reject(new Error("offline")))
     expect(offline.text).toContain("npm could not be reached")
+  })
+
+  it("gives Windows users a node.exe command, since T3 Code there does not run npx", async () => {
+    const m = machine()
+    const node = "C:\\Program Files\\nodejs\\node.exe"
+    const pinned = await doctor(m, m.repo, undefined, undefined, undefined, {
+      platform: "win32",
+      node,
+      bin: "C:\\Users\\me\\.local\\opt\\capy-acp\\node_modules\\capy-acp\\dist\\bin.js"
+    })
+    expect(pinned.text).toContain(
+      "Ready. In your ACP client, add an agent with the command `C:\\Program Files\\nodejs\\node.exe` and the argument `C:\\Users\\me\\.local\\opt\\capy-acp\\node_modules\\capy-acp\\dist\\bin.js`."
+    )
+    const fromNpx = await doctor(m, m.repo, undefined, undefined, undefined, {
+      platform: "win32",
+      node,
+      bin: "C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\1a2b\\node_modules\\capy-acp\\dist\\bin.js"
+    })
+    expect(fromNpx.text).toContain("in a pinned install (https://github.com/yazcaleb/capy-acp#install-without-npx)")
+    expect(fromNpx.text).not.toContain("_npx")
   })
 
   it("tells a rejected key from a network problem", async () => {
