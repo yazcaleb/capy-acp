@@ -1,12 +1,14 @@
 {
   "name": "capy-acp",
   "version": "0.1.0",
-  "description": "Runs Capy coding-agent threads on your machine from Agent Client Protocol (ACP) clients, such as T3 Code.",
+  "description": "Runs Capy coding-agent threads from Agent Client Protocol (ACP) clients, such as Zed, JetBrains IDEs and T3 Code. A community project, not affiliated with Capy.",
   "keywords": [
     "acp",
     "agent-client-protocol",
     "capy",
     "coding-agent",
+    "zed",
+    "jetbrains",
     "t3-code"
   ],
   "homepage": "https://github.com/yazcaleb/capy-acp#readme",

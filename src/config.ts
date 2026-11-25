@@ -30,8 +30,9 @@ export interface AdapterConfig {
 const flag = (value: string | undefined) => value === "1" || value === "true"
 
 /**
- * Where the Capy desktop app keeps its files: Electron's per-user app data folder. Only the Linux
- * location has been seen in practice; `CAPY_DESKTOP_CONFIG_DIR` overrides it.
+ * Where the Capy desktop app keeps its files: Electron's per-user app data folder plus "Capy", which
+ * is what the packaged app sets. Only the Linux location has been checked on a machine;
+ * `CAPY_DESKTOP_CONFIG_DIR` overrides it (a nightly build uses "Capy Nightly").
  */
 export const desktopConfigDir = (env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform = process.platform): string => {
   const { join } = platform === "win32" ? win32 : posix
