@@ -121,36 +121,56 @@ No live test caused `429 capy/RateLimited` (with `retryAfterSeconds` and `retry-
 
 ## Linked and unlinked folders
 
-When the client opens a folder (the ACP `cwd`), capy-acp does one of these things:
+When the client opens a folder (the ACP `cwd`), capy-acp finds the repository and then the workspace.
+
+The repository comes from every git remote of the clone, `origin` first, and from the repository list of a linked folder at
+the git root. A remote counts on any host name, because ssh configs often give github.com another name
+(`git@github-work:acme/app.git`). Only repositories of the user's Capy projects can match, and Capy supports only GitHub.com.
+
+Then capy-acp does one of these things:
 
 1. **The folder is linked.** Its git root is a root in `~/.capy/device/workspaces.json`. The desktop app and `capy dock` both
    keep this file, and capy-acp only reads it. capy-acp uses `{kind: "linked", root}`, so Capy edits the open folder in place,
    as a local agent does. With `CAPY_ACP_WORKSPACE=worktree`, capy-acp uses a new worktree.
-2. **The folder is a clone of a project repository, but it is not linked.** Worktree mode also needs a linked folder of that
-   repository on the device. With `CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1`, capy-acp uses a worktree of that folder. The first reply
-   says that the edits go to `~/.capy/worktrees/…`, not to the open folder.
-3. **The device has no linked folder for the repository.** capy-acp opens the session, because T3 Code does not show
-   `session/new` error messages. The first reply tells you how to fix the problem: link the folder in Capy, then send the
-   message again. Each prompt checks the setup again, so a link during a session works without a new session. The local folder
-   list can be older than the server state. If Capy then answers `400 "This device does not link a folder at …"`, the reply
-   gives the same fix.
+2. **Another linked folder has the repository, and `CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1` is set.** capy-acp uses a worktree of
+   that folder. The first reply says that the edits go to `~/.capy/worktrees/…`, not to the open folder.
+3. **The local list does not show the folder.** The list can be older than the server state, and a Capy update can move or
+   change the file. So the list is only a hint: capy-acp sends the folder as a linked root, and Capy checks it. capy-acp sends
+   the root in the spelling of the opened folder, because git resolves symlinks (macOS `/tmp` is `/private/tmp`) and Capy keeps
+   the spelling that the user linked. On Windows, it uses backslashes. If Capy answers `400 "This device does not link a folder
+   at …"`, the reply tells how to link the folder. Worktree mode needs a linked folder of the repository, so there capy-acp
+   gives the fix without a request.
+
+capy-acp opens the session in all cases, because T3 Code does not show `session/new` error messages. A setup problem is the
+answer to the first prompt. Each prompt checks the setup again, so a link during a session works without a new session.
 
 Users of an editor expect the agent to edit the folder that they opened. Edits in a hidden worktree look as if the agent did
 nothing. capy-acp cannot link folders, because Capy has no public endpoint for it.
 
+### Device files
+
+capy-acp reads the device id from one of two files, and never writes them:
+
+- The desktop app keeps `device-ids.json` in its data folder. The code of the app (0.6.0) sets that folder for a packaged build:
+  `app.setPath("userData", join(app.getPath("appData"), "Capy"))`. This gives `~/.config/Capy` on Linux,
+  `~/Library/Application Support/Capy` on macOS, and `%APPDATA%\Capy` on Windows. Development builds use other names, for
+  example `Capy Dev`.
+- `capy dock` keeps `~/.capy/dock/status.json`, with a `deviceId` field. `capy dock status` prints the same id.
+
 ## Capy API gaps (feedback)
 
-1. **No public endpoint lists devices or links a device folder.** Integrations must read local Capy files to find the device id
-   and the linked folders. `GET /devices`, `GET /devices/{id}/folders` and an endpoint to link a folder would remove this
+1. **No public endpoint lists devices or links a device folder.** Integrations must read local Capy files to find the device id.
+   The list of linked folders is local too, so a client can only guess which folders Capy accepts. `GET /devices`, `GET /devices/{id}/folders` and an endpoint to link a folder would remove this
    dependency. The two ways to pair a machine also keep the device id in different files. The desktop app uses
    `device-ids.json` in its Electron config folder. `capy dock` uses `~/.capy/dock/status.json`.
-2. **A thread does not show where it runs.** `GET /threads/{id}` gives no device, workspace kind or worktree path. Integrations
-   must guess `~/.capy/worktrees/<threadId>`.
+2. **A thread does not show where it runs.** `GET /threads/{id}` gives no device, workspace kind or worktree path. capy-acp finds
+   the worktree at `~/.capy/worktrees/<threadId>/<repository name>`, next to a `.capy-managed.json` file. This was seen with the
+   desktop app on Linux and with `capy dock` on macOS and Windows.
 3. **Tool frames from strong models are empty.** An `execute` frame with `text: ""` does not have the one-line summary that
    `bash` frames have. The `calls` list could give a summary for each inner call.
 4. **Tool frames have no paths, diffs or exit codes.** A `paths: []` field on each write or patch call would let editors show
-   the changed files. In linked mode, capy-acp compares the folder after each call. This cannot work in worktree mode, and it
-   cannot give exit codes or command output.
+   the changed files. capy-acp compares the folder where the thread works (see "File diffs"). This cannot give exit codes or
+   command output, and it cannot tell an edit of the user from an edit of a running call.
 5. **Run and turn frames are not reliable at the start of a stream.** Examples are an extra `aborted` turn, a missing
    `run start`, and a `run start` after content.
 6. **The docs do not describe the interrupt receipt** (`{id, deduped}`).
@@ -181,33 +201,41 @@ nothing. capy-acp cannot link folders, because Capy has no public endpoint for i
     for usage.
 15. **The error for a root that is not linked does not list the linked folders.** A path that is almost correct, such as a
     sibling clone or a symlink, is then difficult to find.
+16. **A tool entry has no status.** Capy commits a call that an interrupt stopped like a finished call. The only difference is
+    that the stopped call has no `calls` list. A model that names its tool directly (Haiku's `bash`) never sends `calls`, so for
+    such an entry after a cancel, a client cannot know the outcome.
 
-## File diffs in linked mode
+## File diffs
 
-The Capy stream gives the names of the inner tools of a call (`write`, `edit`, `bash`), but no paths or contents. In linked
-mode, Capy edits the folder that the client has open. So `src/changes.ts` finds the changes itself, and only reads.
+The Capy stream gives the names of the inner tools of a call (`write`, `edit`, `bash`), but no paths or contents. The thread
+works on this machine: in linked mode in the folder that the client has open, and in worktree mode in its own worktree (gap 2).
+So `src/changes.ts` finds the changes itself, and only reads.
 
 - **Baseline.** When a prompt starts, before capy-acp sends the message, it records `HEAD` and the content of each changed or
   untracked file. It uses `git status --porcelain=v1 -z --untracked-files=all --no-renames`, without ignored files. Thus
   capy-acp never shows uncommitted user edits as Capy edits. If Capy later edits such a file, the diff starts from the user
-  version.
-- **Collection.** After each tool call completes, capy-acp examines files that are changed now, files that it saw before, and
-  files in `HEAD..newHEAD` if Capy committed during the turn. It compares each file by SHA-256 with the last version that it
-  saw, or with the blob at the last `HEAD`.
+  version. A new thread's worktree does not exist yet when the prompt starts. Capy makes it clean at the base commit, so when
+  capy-acp first finds it, the baseline is its `HEAD`.
+- **Collection.** capy-acp looks at the folder when a tool call starts while no other call runs, and when a call finishes. It
+  examines files that are changed now, files that it saw before, and files in `HEAD..newHEAD` if Capy committed during the
+  turn. It compares each file by SHA-256 with the last version that it saw, or with the blob at the last `HEAD`.
 - **Old text.** For a clean file, the old text comes from `git cat-file --filters`, which applies the checkout conversions. Git
   for Windows checks text out with CRLF, and `.gitattributes` can set eol and smudge filters. Git also accepts an LF copy as
   clean under `core.autocrlf`. If only the line endings of the raw blob agree with the working file, capy-acp uses the raw blob.
   capy-acp sets `GIT_LFS_SKIP_SMUDGE=1`, so a diff never downloads LFS content.
 - **Update.** capy-acp sends the changes as a `tool_call_update` on that call. The update has the kind `edit` (`delete` if all
   changes are deletions), a title with the file names, `content: [{type: "diff", path, oldText?, newText}]` and `locations`.
+- **Attribution by time.** A call gets the changes that occurred while it ran. A change found when a call starts, after a
+  read-only call (`read`, `search`, `fetch`, `think`), or after the last call occurred while no Capy call could write. It gets
+  an item of its own with the kind `other` and the title `Edited … outside a Capy tool call`, so that T3 shows the title and
+  not "Changed files". Such changes come from the user, or from a command that Capy left running in the background. An edit
+  of the user while a call that can write runs is credited to that call: capy-acp sees files, not processes.
+- **Last check.** At the end of the turn, a last check finds edits from a call that did not report its end, for example after
+  an interrupt. Each call gets its changes one time, so ACP `content`, which replaces and does not append, never loses a diff.
 - **Limits.** Binary files and files over 256 KiB get a location, but no diff. capy-acp compares files over 16 MiB by size and
   modification time. Symlinks show as their target path, as git stores them. capy-acp tracks a maximum of 500 files in a turn.
-- **Last check.** At the end of the turn, a last check finds edits from a call that did not report its end, for example after
-  an interrupt. These edits join the diffs of the latest call, because ACP `content` replaces and does not append. If there was
-  no call, they get their own tool call.
-- **Attribution by time.** capy-acp gives each change to the call that ran at that time. This includes edits that the user
-  makes in the same folder during a turn. If tracking fails (no git repository, a git timeout), capy-acp writes the error to
-  stderr and shows no diffs for that turn. The prompt does not fail.
+  If tracking fails (no git repository, a git timeout), capy-acp writes the error to stderr and shows no diffs for that turn.
+  The prompt does not fail.
 - A rename shows as a deletion and an addition. capy-acp does not show changes of the file mode only (`chmod +x`).
 
 ## Sessions, media and subagents
@@ -238,8 +266,11 @@ mode, Capy edits the folder that the client has open. So `src/changes.ts` finds 
   pending until the subagent was seen running, and completed after that. A parent that waits for its subagent ends its run as
   `waiting`. The later subagent frames and the answer of the parent come in the next run, and capy-acp follows that run in the
   same prompt. After a run ends, the stream does not replay `task` frames.
-- **Cancel.** After the interrupt, Capy commits the stopped call as a normal tool entry, without a status. capy-acp shows a
-  call that closes after a cancel as failed.
+- **Cancel.** After the interrupt, Capy commits the stopped call as a normal tool entry, without a status (gap 16). In every
+  cancelled test turn (Opus 5.5 on Linux, macOS and Windows), the stopped `execute` entry had no `calls` list, and each
+  finished one had it. So capy-acp shows an `execute` entry without `calls` as failed, with the title "Stopped tool call", and
+  all others as completed. For an entry that names its tool directly (Haiku), the outcome after a cancel is unknown, and
+  capy-acp shows it as failed. `session/load` uses the same rule.
 - **Windows shell.** On Windows, Capy uses Git Bash. In one test, Capy wrote a file named `NUL` with a redirect in cmd style.
   The diffs showed it as an added file.
 
@@ -270,7 +301,8 @@ mode, Capy edits the folder that the client has open. So `src/changes.ts` finds 
 - T3 shows ACP kinds strictly. `execute` becomes "Ran command", with `rawInput.command` or a title in backticks as the command
   line. `edit`, `delete` and `move` become "Changed files", with a patch from the `diff` content. All other kinds become one
   line with the title. Capy gives no command text. So capy-acp never sends `execute` (this prevents an empty `$ ` or an invented
-  command), and it sends `edit` only with real diffs.
+  command), and it sends `edit` only with real diffs. Changes outside a Capy tool call get the kind `other`, so T3 shows their
+  title, which says where they came from.
 - The T3 checkpoint at the end of a turn was `[]` on the first run of a thread, and listed the files on the second run. The
   diffs from capy-acp were correct on both runs.
 - The model picker shows `default` until a session reports `configOptions`. capy-acp sends the Capy model list with each
@@ -303,6 +335,20 @@ On macOS 26 arm64 and Windows Server 2022 x64 with `capy dock` 0.7.2 and an ACP 
 | One subagent on the same machine | Pending, in progress, completed | Same as macOS |
 | Edit in linked mode | Not run | Diffs with Windows paths, CRLF line endings kept |
 
+On Linux x64 with the desktop app 0.6.0 and an ACP test client, and on Windows with `capy dock` 0.7.2, 2026-11-25:
+
+| Check | Result |
+| --- | --- |
+| Opus 5.5: `echo first`, then a long loop, cancel during the loop | The first call stayed `completed`, and the stopped call became `failed`. A second run, in which Opus ran both commands in one call, showed that call as `failed`, "Stopped tool call" |
+| The harness edited README.md 1 s after the prompt, before the first Capy call | An item "Edited README.md outside a Capy tool call" came before the first call, which showed no diff |
+| Worktree mode: a new file and an edit | "Edited README.md and notes/WORKTREE.md" with paths in `~/.capy/worktrees/<thread>/capy-acp-sandbox`. The open folder did not change |
+| Worktree mode on Windows | "Created notes/WORKTREE.md" with a path in `C:\Users\…\.capy\worktrees\<thread>\capy-acp-sandbox` |
+| Capy delivered a file (desktop app) | `file:///tmp/capy-acp-deliver/hello.txt`, `text/plain`, 20 B |
+| One subagent on the same machine (desktop app) | Pending, in progress, completed. The answer, 187 bytes, matched `wc -c` |
+| Haiku 5.5: the same cancel check | Capy put the loop in the background, so both calls finished before the cancel. Haiku entries have no `calls` list (gap 16) |
+
+The unit tests pass on Linux, macOS 26 and Windows Server 2022.
+
 These live checks found bugs. Each fix has a regression test:
 
 - **The follow-up replayed the previous reply.** Capy commits the final assistant entry after `status: idle`. The turn ended on
@@ -320,3 +366,5 @@ These live checks found bugs. Each fix has a regression test:
 - **A new subagent showed as completed first**, and **a cancelled call showed as completed**. See "Subagents" and "Cancel".
 - **Windows:** parallel session saves failed with `EPERM`, delivered files got the download URL instead of the local path, and
   diffs marked all lines as changed because of CRLF line endings.
+- **macOS:** git resolves symlinks in the root that it prints, so a folder outside the local list went to Capy as
+  `/private/tmp/…`. Now capy-acp sends the spelling of the opened folder (found by the unit tests on macOS).

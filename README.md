@@ -7,21 +7,18 @@ capy-acp runs [Capy](https://capy.ai) coding-agent threads from an [Agent Client
 folder that you open, with your tools. Device threads use no Capy machine time. The model runs on your connected subscription,
 unless you select a model that Capy bills to credits.
 
-capy-acp is an independent project. Capy did not make it. Version 0.1 has these test results:
-
-- Linux x64: Capy desktop app 0.6.0, T3 Code 0.1.12, Node 22.
-- macOS 26 arm64: `capy dock` 0.7.2, Node 26, an ACP test client.
-- Windows Server 2022 x64: `capy dock` 0.7.2, Node 24, an ACP test client.
-
-Read [Limitations](#limitations) before you use it.
+capy-acp is an independent project. Capy did not make it. Read [Limitations](#limitations) and [Tests](#tests) before you use
+it.
 
 ## What the client shows
 
 - The reply from Capy, streamed as Capy writes it.
 - One item for each Capy tool call. The title gives the tools and the time, for example `bash, write (1.2 s)`.
 - A diff of each file that a tool call changed, for example `Edited README.md and scripts/greet.sh`. The Capy stream does not
-  give paths or contents. After each tool call, the adapter reads the changes from your folder with git (read only). Edits that
-  you made before the prompt do not count.
+  give paths or contents. The adapter reads the changes with git (read only), in your folder or in the Capy worktree of the
+  thread. It looks when a tool call starts and when it ends. Edits that you made before the prompt do not count. A change that
+  occurs while no Capy tool call can write, for example your own edit between two calls, gets its own item:
+  `Edited notes.md outside a Capy tool call`.
 - Images, audio and other files that you attach. They go to Capy with the message, and Capy models see attached images.
 - Files that Capy attaches to a reply, as links. A file that Capy made on this machine links to its local path. Other files link
   to a Capy download URL, which expires.
@@ -29,7 +26,8 @@ Read [Limitations](#limitations) before you use it.
 
 The adapter also does these things:
 
-- Cancel stops the Capy thread. A follow-up message continues the same thread.
+- Cancel stops the Capy thread. The call that the cancel stopped shows as failed, and calls that finished before it show as
+  completed. A follow-up message continues the same thread.
 - Sessions stay available after a restart. `session/load` replays the thread transcript, and `session/resume` connects again
   without a replay. `session/list` lists the saved sessions. The next prompt continues the same Capy thread.
 - If the connection drops, the adapter connects again and continues from the last event. It shows each event one time.
@@ -47,7 +45,7 @@ message or in `AGENTS.md`, or change the Capy settings. The Capy docs say that C
 
 - Node 22 or later.
 - A Capy device on this machine. Sign in to the Capy desktop app, or run the headless `capy dock`.
-- A GitHub repository in a Capy project, cloned with an `origin` remote.
+- A clone of a GitHub repository that is in a Capy project. Any git remote of the clone can name the repository.
 - The folder of that clone, linked to this device. Use one of these:
   - Capy settings: Projects, then your project, then Project folders.
   - Scan a folder in the Capy desktop app.
@@ -80,13 +78,13 @@ you.
 | `CAPY_API_KEY_FILE` | `~/.config/capy-acp/api-key` | The file with the key, if `CAPY_API_KEY` is not set |
 | `CAPY_ACP_MODEL` | `anthropic/claude-opus-5-5` | The first model of a session. The model picker lists all models of your Capy account and labels the models that Capy bills to credits |
 | `CAPY_ACP_REASONING` | `high` | The first reasoning level. If a model does not offer this level, the adapter uses the last level that the model lists |
-| `CAPY_ACP_WORKSPACE` | `linked` | `linked`: Capy edits the folder that you opened. `worktree`: each session gets a new Capy worktree, and the client shows no diffs |
+| `CAPY_ACP_WORKSPACE` | `linked` | `linked`: Capy edits the folder that you opened. `worktree`: each session gets a new Capy worktree, under `~/.capy/worktrees`. The diffs show the files there |
 | `CAPY_ACP_ALLOW_WORKTREE_FALLBACK` | off | For a clone that is not linked, use a worktree of a linked folder of the same repository |
 | `CAPY_ACP_WAITING_LIMIT_MS` | `600000` | The time that a prompt stays open while Capy waits for a background command |
 | `CAPY_ACP_FORWARD_HOST_INSTRUCTIONS` | off | Send the host instructions from T3 Code to Capy. Without this setting, the adapter sends only the request of the user |
 | `CAPY_DEVICE_ID` | from the desktop app or `capy dock` | The device to use, if the machine has a device in more than one organization |
 | `CAPY_DESKTOP_CONFIG_DIR` | `~/.config/Capy` (Linux), `~/Library/Application Support/Capy` (macOS), `%APPDATA%\Capy` (Windows) | The folder of the desktop app file `device-ids.json` |
-| `CAPY_HOME` | `~/.capy` | The folder of `device/workspaces.json` (the linked folders) and, for `capy dock`, `dock/status.json` |
+| `CAPY_HOME` | `~/.capy` | The folder of `worktrees`, `device/workspaces.json` (the linked folders) and, for `capy dock`, `dock/status.json` |
 | `CAPY_ACP_STATE_DIR` | `~/.local/state/capy-acp/sessions` | The saved sessions: one small JSON file for each session, with ids, the stream cursor and the model. No credentials |
 | `CAPY_ACP_ATTACHMENTS_DIR` | `~/.cache/capy-acp/attachments` | The folder for files from the *first* prompt of a thread (see below) |
 
@@ -98,21 +96,32 @@ gives their paths, and the device agent reads them on this machine. Follow-up me
 
 ## Limitations
 
-- **The adapter finds the device in local Capy files.** The Capy public API cannot list devices or linked folders. The adapter
-  reads `device-ids.json` (desktop app) or `~/.capy/dock/status.json` (`capy dock`), and `workspaces.json`. It never writes
-  these files. If a Capy update moves or changes them, setup fails, and the reply gives the file that the adapter could not
-  read. The macOS and Windows paths of the desktop app are the Electron defaults, and no test used them. If your paths are
-  different, set `CAPY_DESKTOP_CONFIG_DIR` and `CAPY_HOME`.
-- **Tool items show tool names and times, but no commands or output.** The Capy stream does not give them. In linked mode, the
-  diffs show the file changes. In worktree mode, the client shows no diffs.
+The first four come from Capy. [docs/capy-api-notes.md](docs/capy-api-notes.md) lists the API changes that would remove the
+first three.
+
+- **Tool items show tool names and times, but no commands or output.** The Capy stream does not give them. The diffs show the
+  file changes.
 - **The client shows no reasoning, plan or token usage.** The Capy stream does not give them.
-- **The adapter works only with GitHub repositories**, which it finds from the `origin` remote.
-- Tests saw delivered files and subagents only with `capy dock` on macOS and Windows: one text file, and one subagent on the
-  same machine. No test used a subagent on a new cloud machine.
-- On macOS and Windows, an ACP test client operated the adapter. T3 Code did not.
-- After a cancel, the client shows the stopped tool call as failed. This is also true for a call that completed just before the
-  cancel, because the Capy transcript does not show the difference.
-- If you edit files in the folder while Capy works, the diffs show your edits as part of the current Capy tool call.
+- **The adapter reads the device id from a local Capy file.** The Capy API cannot list devices. The file is `device-ids.json`
+  of the desktop app, or `~/.capy/dock/status.json` of `capy dock`. The adapter never writes it. If a Capy update moves it,
+  setup fails, and the reply names the file. Set `CAPY_DEVICE_ID` to continue.
+- **Capy works only with repositories on GitHub.com.**
+- **If you edit a file while a Capy tool call that can write runs, the diffs show your edit as part of that call.** The adapter
+  sees only the files, not the process that changed them.
+
+## Tests
+
+| Platform | Capy | Client | Checks |
+| --- | --- | --- | --- |
+| Linux x64, Node 22 to 26 | Desktop app 0.6.0 | T3 Code 0.1.12, ACP test client | All the items in [What the client shows](#what-the-client-shows), and restarts |
+| macOS 26 arm64, Node 26 | `capy dock` 0.7.2 | ACP test client | Prompts, cancel, a dropped stream, a delivered file, a subagent |
+| Windows Server 2022 x64, Node 24 | `capy dock` 0.7.2 | ACP test client | The macOS checks, and diffs in linked mode and worktree mode |
+
+CI runs the unit tests on Linux. The unit tests also pass on macOS and Windows. These cases had no test:
+
+- T3 Code on macOS or Windows.
+- The desktop app on macOS or Windows. The adapter finds its files in the folders that the code of the app sets.
+- A subagent on a new cloud machine.
 
 ## Troubleshooting
 
@@ -122,7 +131,7 @@ The adapter writes its log to stderr. These are common first replies:
 | --- | --- |
 | `No Capy API key` | Run `npx -y capy-acp --setup`, or set `CAPY_API_KEY`. Then send the message again |
 | `No paired Capy device found` | Sign in to the Capy desktop app, or run `capy dock`. Or set `CAPY_DEVICE_ID`, and `CAPY_DESKTOP_CONFIG_DIR` or `CAPY_HOME` |
-| `… is not a clone of a GitHub repository` | Open the folder of the repository. Its `origin` remote must point to GitHub |
+| `… is not in a git repository`, or `… has no git remote that names a GitHub repository` | Open the folder of a clone. One of its remotes must name the GitHub repository |
 | `No Capy project includes owner/repo` | Add the repository to a Capy project |
 | `… is not a linked folder on this Capy device` | Link the folder in Capy as the reply tells you. Then send the message again |
 | `Capy has not started on this message yet` | Make sure that the Capy desktop app or `capy dock` runs and is signed in. The message stays in the thread queue |
