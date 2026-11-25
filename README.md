@@ -88,7 +88,7 @@ The other [settings](#settings) go in the same list.
 run that copy:
 
 ```sh
-npm install --prefix ~/.local/opt/capy-acp capy-acp@0.1.0
+npm install --prefix ~/.local/opt/capy-acp capy-acp@0.2.0
 ```
 
 Then set the command to `node` with the argument `~/.local/opt/capy-acp/node_modules/capy-acp/dist/bin.js`, as an absolute
