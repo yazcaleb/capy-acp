@@ -22,7 +22,7 @@ import { makeSessionStore, type SessionRecord } from "./store.js"
 import { history } from "./translate.js"
 import { fileLink, runTurn, titleOf } from "./turn.js"
 import { AGENT_NAME, AGENT_VERSION } from "./version.js"
-import { readDeviceId, readGit, readLinkedFolders, resolveWorkspace, type ResolvedWorkspace } from "./workspace.js"
+import { readDevice, readGit, readLinkedFolders, resolveWorkspace, type ResolvedWorkspace } from "./workspace.js"
 
 /** Where a session's threads run. Replaced as a whole when a prompt re-checks the folder. */
 interface Setup {
@@ -207,16 +207,16 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
 
   /** Folder → project → device workspace. Never throws: failures become the session's `problem`. */
   const setUp = async (cwd: string, threadId: () => string | undefined): Promise<Setup> => {
-    const [projects, deviceId, linked, git] = await Promise.allSettled([
+    const [projects, device, linked, git] = await Promise.allSettled([
       attempt(withCapy((capy) => capy.listProjects)),
-      readDeviceId(config),
+      readDevice(config),
       readLinkedFolders(config),
       readGit(cwd)
     ])
     // Reported in this order: the API key first, then the paired device, since nothing else can be
     // fixed without them. (Folder and git reads never reject.)
-    if (projects.status === "rejected" || deviceId.status === "rejected" || linked.status === "rejected" || git.status === "rejected") {
-      const reason: unknown = [projects, deviceId, linked, git].flatMap((r) => (r.status === "rejected" ? [r.reason] : []))[0]
+    if (projects.status === "rejected" || device.status === "rejected" || linked.status === "rejected" || git.status === "rejected") {
+      const reason: unknown = [projects, device, linked, git].flatMap((r) => (r.status === "rejected" ? [r.reason] : []))[0]
       return { deviceId: "", resolved: undefined, problem: setupProblem(reason), changes: undefined }
     }
     const resolution = resolveWorkspace({
@@ -225,14 +225,21 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
       linked: linked.value,
       projects: projects.value,
       mode: config.workspaceMode,
-      allowWorktreeFallback: config.allowWorktreeFallback
+      allowWorktreeFallback: config.allowWorktreeFallback,
+      device: device.value.kind
     })
-    if (resolution._tag === "Unresolved") return { deviceId: deviceId.value, resolved: undefined, problem: resolution.problem, changes: undefined }
+    if (resolution._tag === "Unresolved") return { deviceId: device.value.id, resolved: undefined, problem: resolution.problem, changes: undefined }
     const workspace = resolution.value.workspace
     const changes = workspace.kind === "linked"
       ? makeChangeTracker(workspace.root, log)
       : makeWorktreeTracker(config.capyHome, resolution.value.repo, threadId, log)
-    return { deviceId: deviceId.value, resolved: resolution.value, problem: undefined, changes }
+    return { deviceId: device.value.id, resolved: resolution.value, problem: undefined, changes }
+  }
+
+  const requireApiKey = async () => {
+    if ((await savedApiKey(config)) === undefined) {
+      throw acp.RequestError.authRequired(undefined, "No Capy API key. Run `npx -y capy-acp --setup`, or set CAPY_API_KEY.")
+    }
   }
 
   /** A saved session to continue. A session that never sent a prompt has no record, and opens empty. */
@@ -284,19 +291,19 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         sessionCapabilities: { list: {}, resume: {}, close: {} }
       },
       agentInfo: { name: AGENT_NAME, title: "Capy", version: AGENT_VERSION },
-      // Without a key, prompts still open and answer with the fix; this method lets a client offer setup.
+      // Without a key, sessions fail with auth_required; this method lets a client offer setup.
       authMethods: [API_KEY_AUTH]
     }))
     .onRequest(acp.methods.agent.authenticate, async () => {
-      if ((await savedApiKey(config)) === undefined) {
-        throw acp.RequestError.authRequired(undefined, `No Capy API key. Run capy-acp --setup, or set CAPY_API_KEY.`)
-      }
+      await requireApiKey()
       return {}
     })
     .onRequest(acp.methods.agent.session.new, async ({ params }) => {
-      // Setup problems become the session's first reply instead of a session/new error: T3 Code
+      // A missing key fails here with auth_required, so clients offer sign-in (T3 Code shows the
+      // agent as signed out). Other setup problems become the session's first reply instead: T3 Code
       // shows only "Provider session failed to open" and drops the error's message, which here
       // always names the fix. Each prompt re-checks, so linking the folder needs no new session.
+      await requireApiKey()
       const sessionId = randomUUID()
       return { sessionId, configOptions: await openSession(sessionId, params.cwd, undefined) }
     })

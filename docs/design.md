@@ -121,7 +121,10 @@ So `src/changes.ts` finds the changes itself, and only reads.
 
   capy-acp sends only the request. `CAPY_ACP_FORWARD_HOST_INSTRUCTIONS=1` sends all of the text.
 - **`session/new` errors lose their message.** T3 shows only "Provider session failed to open". So capy-acp opens the session,
-  and answers the first prompt with the setup problem and its fix.
+  and answers the first prompt with the setup problem and its fix. A missing API key is the exception. T3's provider check
+  opens a session, and it shows the agent as signed out only when `session/new` fails with `auth_required` (-32000).
+  Otherwise it shows the agent as ready. So without a key, `session/new` fails with `auth_required`, and T3 offers the
+  terminal auth method (`--setup`).
 - T3 shows ACP kinds strictly. `execute` becomes "Ran command", with `rawInput.command` or a title in backticks as the command
   line. `edit`, `delete` and `move` become "Changed files", with a patch from the `diff` content. All other kinds become one
   line with the title. Capy gives no command text. So capy-acp never sends `execute` (this prevents an empty `$ ` or an invented

@@ -57,7 +57,12 @@ if (command === "--doctor") {
     if (Exit.isSuccess(exit)) return exit.value
     throw exit.cause.reasons.find(Cause.isFailReason)?.error ?? new Error(Cause.pretty(exit.cause))
   }
-  const io = { write: (text: string) => void process.stdout.write(text), listProjects, nodeVersion: process.version }
+  const latestVersion = async () => {
+    const response = await fetch("https://registry.npmjs.org/capy-acp/latest", { signal: AbortSignal.timeout(3_000) })
+    const body = response.ok ? ((await response.json()) as { version?: unknown }) : {}
+    return typeof body.version === "string" ? body.version : undefined
+  }
+  const io = { write: (text: string) => void process.stdout.write(text), listProjects, nodeVersion: process.version, latestVersion }
   process.exit(await runDoctor(config, resolve(rest[0] ?? "."), io))
 }
 

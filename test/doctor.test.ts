@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest"
 import { CapyApiError } from "../src/capy/client.js"
 import { readConfig } from "../src/config.js"
 import { type DoctorIo, runDoctor } from "../src/doctor.js"
+import { AGENT_VERSION } from "../src/version.js"
 import type { ProjectSummary } from "../src/workspace.js"
 
 const dirs: Array<string> = []
@@ -47,10 +48,16 @@ const doctor = async (
   m: ReturnType<typeof machine>,
   folder: string,
   listProjects: DoctorIo["listProjects"] = async () => PROJECTS,
-  nodeVersion = "v24.1.0"
+  nodeVersion = "v24.1.0",
+  latestVersion: DoctorIo["latestVersion"] = async () => AGENT_VERSION
 ) => {
   const output: Array<string> = []
-  const code = await runDoctor(m.config, folder, { write: (text) => void output.push(text), listProjects, nodeVersion })
+  const code = await runDoctor(m.config, folder, {
+    write: (text) => void output.push(text),
+    listProjects,
+    nodeVersion,
+    latestVersion
+  })
   return { code, text: output.join("") }
 }
 
@@ -62,7 +69,8 @@ describe("capy-acp --doctor", () => {
     expect(text).not.toContain("FAIL")
     expect(text).toContain("ok    Node v24.1.0")
     expect(text).toContain("Capy accepted it and shows 1 project.")
-    expect(text).toContain("device_DOCK")
+    expect(text).toContain(`ok    capy-acp ${AGENT_VERSION}, the newest version on npm.`)
+    expect(text).toContain("device_DOCK. Keep `capy dock` running")
     expect(text).toContain('acme/app, in the Capy project "App"')
     expect(text).toContain("Capy edits it in place")
     expect(text).toContain("Ready.")
@@ -79,6 +87,15 @@ describe("capy-acp --doctor", () => {
     expect(text).toContain("FAIL  Start Capy on this computer.")
     expect(text).toContain("note  The folder check needs an API key that Capy accepts.")
     expect(text).toContain("3 problems to fix.")
+  })
+
+  it("says when npm has a newer capy-acp, without failing the check", async () => {
+    const m = machine()
+    const newer = await doctor(m, m.repo, undefined, undefined, async () => "99.0.0")
+    expect(newer.code).toBe(0)
+    expect(newer.text).toContain(`note  capy-acp ${AGENT_VERSION}, and npm has 99.0.0. \`npx -y capy-acp@latest\` runs the newest version.`)
+    const offline = await doctor(m, m.repo, undefined, undefined, () => Promise.reject(new Error("offline")))
+    expect(offline.text).toContain("npm could not be reached")
   })
 
   it("tells a rejected key from a network problem", async () => {

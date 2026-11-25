@@ -12,6 +12,8 @@ import { join, posix, relative, resolve, win32 } from "node:path"
 import { promisify } from "node:util"
 import type { AdapterConfig } from "./config.js"
 import {
+  type DeviceFile,
+  type DeviceKind,
   manyOrganizations,
   noDevice,
   noGitHubRemote,
@@ -91,6 +93,8 @@ export const resolveWorkspace = (input: {
   readonly projects: ReadonlyArray<ProjectSummary>
   readonly mode: AdapterConfig["workspaceMode"]
   readonly allowWorktreeFallback: boolean
+  /** How this computer is paired, for the steps that link a folder. */
+  readonly device?: DeviceKind | undefined
   readonly platform?: NodeJS.Platform
 }): Resolution => {
   const unresolved = (problem: Problem): Resolution => ({ _tag: "Unresolved", problem })
@@ -106,7 +110,14 @@ export const resolveWorkspace = (input: {
     return unresolved(candidates.length === 0 ? noGitHubRemote(gitRoot) : notInProject(candidates))
   }
   const sameRepo = input.linked.find((folder) => folder !== here && folder.repos.some((r) => r.toLowerCase() === repo))
-  const notLinkedHere = notLinked({ root: gitRoot, projectName: project.name, sameRepoRoot: sameRepo?.root })
+  const notLinkedHere = notLinked({
+    root: gitRoot,
+    repo,
+    projectId: project.id,
+    projectName: project.name,
+    device: input.device,
+    sameRepoRoot: sameRepo?.root
+  })
   const base = { projectId: project.id, projectName: project.name, repo, notLinked: notLinkedHere }
   if (here !== undefined) {
     return input.mode === "linked"
@@ -137,7 +148,7 @@ export const resolveWorkspace = (input: {
     return unresolved(notLinkedHere)
   }
   // Not in the local list, which can be older than Capy's own, or unreadable. Capy checks the root when
-  // the thread starts and refuses one it does not link; the reply then gives `linkFix`. Git prints
+  // the thread starts and refuses one it does not link; the reply then gives `notLinked`. Git prints
   // Windows paths with forward slashes, so the root goes in the form Windows gives it.
   const opened = input.openedRoot ?? gitRoot
   const root = (input.platform ?? process.platform) === "win32" ? win32.normalize(opened) : opened
@@ -146,33 +157,43 @@ export const resolveWorkspace = (input: {
 
 const readJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"))
 
+export interface Device {
+  readonly id: string
+  /** Undefined when `CAPY_DEVICE_ID` names the device. */
+  readonly kind: DeviceKind | undefined
+}
+
 /**
- * The paired device's id. With several organizations, `CAPY_DEVICE_ID` picks one explicitly.
+ * The paired device. With several organizations, `CAPY_DEVICE_ID` picks one explicitly.
  *
  * A machine is paired either by the desktop app (`device-ids.json`, one id per organization) or by the headless
  * `capy dock` daemon, which records its one device in `~/.capy/dock/status.json`. Both share `~/.capy/device`.
  */
-export const readDeviceId = async (config: AdapterConfig): Promise<string> => {
-  if (config.deviceIdOverride) return config.deviceIdOverride
+export const readDevice = async (config: AdapterConfig): Promise<Device> => {
+  if (config.deviceIdOverride) return { id: config.deviceIdOverride, kind: undefined }
   const desktop = join(config.capyDesktopConfigDir, "device-ids.json")
+  const checked: Array<DeviceFile> = []
   let ids: Array<string> = []
   try {
     const data = (await readJson(desktop)) as { orgs?: Record<string, unknown> }
     ids = Object.values(data.orgs ?? {}).filter((id): id is string => typeof id === "string" && id !== "")
+    checked.push({ path: desktop, found: "no device" })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw new ProblemError(unreadableDeviceFile(desktop, error instanceof Error ? error.message : String(error)))
     }
+    checked.push({ path: desktop, found: "missing" })
   }
-  if (ids.length === 1 && ids[0]) return ids[0]
+  if (ids.length === 1 && ids[0]) return { id: ids[0], kind: "desktop" }
   if (ids.length > 1) throw new ProblemError(manyOrganizations(ids.length))
   const dock = join(config.capyHome, "dock", "status.json")
   const docked = await readJson(dock).then(
-    (data) => (data as { deviceId?: unknown }).deviceId,
-    () => undefined
+    (data) => ({ found: "no device" as const, id: (data as { deviceId?: unknown }).deviceId }),
+    () => ({ found: "missing" as const, id: undefined })
   )
-  if (typeof docked === "string" && docked !== "") return docked
-  throw new ProblemError(noDevice([desktop, dock]))
+  if (typeof docked.id === "string" && docked.id !== "") return { id: docked.id, kind: "dock" }
+  checked.push({ path: dock, found: docked.found })
+  throw new ProblemError(noDevice(checked))
 }
 
 export const readLinkedFolders = async (config: AdapterConfig): Promise<ReadonlyArray<LinkedFolder>> => {

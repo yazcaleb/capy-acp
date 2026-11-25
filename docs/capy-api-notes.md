@@ -65,14 +65,19 @@ its folders are sidebar folders for threads, not device folders. A client finds 
 and a different one for each way to pair a machine:
 
 - The desktop app writes `device-ids.json` in its Electron user data folder, one id for each organization. The folder name
-  changes with the release channel (`Capy`, `Capy Nightly`, `Capy Dev`).
+  changes with the release channel (`Capy`, `Capy Nightly`, `Capy Dev`). Desktop 0.10.0 writes the file when its device
+  daemon starts. An install of 0.4.3 had no such file, only `device-credentials.json`, which also holds the device tokens.
 - `capy dock` writes `~/.capy/dock/status.json`.
 
 The linked folders are in `~/.capy/device/workspaces.json`, which the app writes again from server state. The local copy
 can be out of date, so capy-acp sends the root anyway and reads the answer:
 `400 capy/InvalidRequest "This device does not link a folder at <path>"`.
 
-**Cost.** `readDeviceId` and `readLinkedFolders` in `src/workspace.ts`, a `CAPY_DEVICE_ID` setting for users in more than
+Only the device can link a folder: the desktop app (`capy://app/settings/projects/<id>` opens the project there), or
+`capy dock dirs add`, which works only while the dock is stopped. Stopping the dock stops the threads that run on it, so
+the fix for an unlinked folder interrupts other work on a dock machine.
+
+**Cost.** `readDevice` and `readLinkedFolders` in `src/workspace.ts`, a `CAPY_DEVICE_ID` setting for users in more than
 one organization, and a regex on an error message (`isNotLinked` in `src/agent.ts`). A Capy release that moves one of these files
 would break every integration that does this.
 
@@ -90,7 +95,8 @@ GET /devices/{id}/folders
 
 A client also needs to know which device is the machine that it runs on. An API key cannot tell. A documented local command
 would be enough, for example `capy device --json` → `{deviceId, orgId, folders, worktreeBase}`, with the same output from
-the app and the dock.
+the app and the dock. The same command could link a folder on a running dock, for example through the dock's local socket,
+so that linking a folder does not stop the threads that run there.
 
 ### 2. A turn-commit and cursor contract
 

@@ -53,13 +53,19 @@ export const unreachable = (apiUrl: string, detail: string): Problem => ({
   steps: [`Check the network connection to ${apiUrl}.`, RETRY]
 })
 
-export const noDevice = (files: ReadonlyArray<string>): Problem => ({
+/** A file that can name this computer's Capy device, and what capy-acp found in it. */
+export interface DeviceFile {
+  readonly path: string
+  readonly found: "missing" | "no device"
+}
+
+export const noDevice = (files: ReadonlyArray<DeviceFile>): Problem => ({
   title: "Start Capy on this computer",
-  detail: "Capy threads run on this computer, and it is not paired with Capy.",
+  detail: "Capy threads run on this computer, and capy-acp found no Capy device here.",
   steps: [
     "Open the Capy desktop app and sign in, or run `capy dock` on a computer without a screen.",
     RETRY,
-    `capy-acp looks for the device in ${files.join(" and ")}. If Capy keeps its files elsewhere, set \`CAPY_DEVICE_ID\`.`
+    `capy-acp looked in ${files.map((file) => `${file.path} (${file.found === "missing" ? "missing" : "no device in it"})`).join(" and ")}. Capy desktop 0.10.0 writes device-ids.json when it starts, and older versions may not, so update the desktop app if you use it. Or set \`CAPY_DEVICE_ID\` to this computer's device id.`
   ]
 })
 
@@ -105,20 +111,43 @@ export const notInProject = (repos: ReadonlyArray<string>): Problem => ({
   steps: ["Open https://capy.ai/settings/projects and add the repository to a project.", RETRY]
 })
 
+/** How this computer is paired with Capy, which decides how a folder gets linked. */
+export type DeviceKind = "desktop" | "dock"
+
+const linkSteps = (input: { readonly root: string; readonly projectId: string; readonly projectName: string; readonly device: DeviceKind | undefined }) => {
+  // Only the device itself can link a local folder: the desktop app, or `capy dock dirs add`. The
+  // web app cannot. `capy://app/<path>` opens that page of the desktop app (checked in 0.10.0).
+  const desktop = `Open \`capy://app/settings/projects/${input.projectId}\` to show "${input.projectName}" in the Capy desktop app. Set it up on this computer and choose ${input.root}.`
+  const dock = [
+    "Stop `capy dock`. Caution: this also stops the Capy threads that run on this computer.",
+    `Run \`capy dock dirs add ${input.root}\`, then start \`capy dock\` again.`
+  ]
+  if (input.device === "desktop") return [desktop]
+  if (input.device === "dock") return dock
+  return [`With the desktop app: ${desktop}`, `With \`capy dock\`: ${dock.join(" ")}`]
+}
+
 export const notLinked = (input: {
   readonly root: string
+  readonly repo: string
+  readonly projectId: string
   readonly projectName: string
-  /** Another linked clone of the repository, for the worktree option. */
+  readonly device: DeviceKind | undefined
+  /** Another folder on this computer that Capy links for the same repository. */
   readonly sameRepoRoot?: string | undefined
-}): Problem => ({
-  title: "Link this folder to Capy",
-  detail: `Capy runs threads only in folders that are linked to this computer, and ${input.root} is not linked.`,
-  steps: [
-    `Open https://capy.ai/settings/projects, choose "${input.projectName}", and add the folder under Project folders. In the Capy desktop app you can also use Scan a folder. With \`capy dock\`, stop it and run \`capy dock dirs add ${input.root}\`.`,
-    RETRY,
-    ...(input.sameRepoRoot === undefined
-      ? []
-      : [`Or set \`CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1\` to work in a new worktree of ${input.sameRepoRoot} instead.`])
-  ]
-})
-
+}): Problem =>
+  input.sameRepoRoot === undefined
+    ? {
+        title: "Link this folder to Capy",
+        detail: `Capy runs threads only in folders that are linked to this computer, and ${input.root} is not linked.`,
+        steps: [...linkSteps(input), RETRY]
+      }
+    : {
+        title: `Use the folder that Capy links for ${input.repo}`,
+        detail: `On this computer, Capy links ${input.repo} at ${input.sameRepoRoot}, not at ${input.root}.`,
+        steps: [
+          `Open ${input.sameRepoRoot} in your editor, and start a new chat there.`,
+          `Or link ${input.root} instead. ${linkSteps(input).join(" ")} Then send your message again.`,
+          `Or set \`CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1\` in the agent's environment. Capy then works in a new worktree of ${input.sameRepoRoot}, and its edits do not appear in ${input.root}.`
+        ]
+      }

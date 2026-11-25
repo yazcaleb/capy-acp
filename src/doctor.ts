@@ -7,13 +7,23 @@ import type { AdapterConfig } from "./config.js"
 import { noApiKey, type Problem, problemOf, rejectedApiKey, toText, unreachable } from "./problems.js"
 import { savedApiKey } from "./setup.js"
 import { AGENT_VERSION } from "./version.js"
-import { type ProjectSummary, readDeviceId, readGit, readLinkedFolders, resolveWorkspace, samePath } from "./workspace.js"
+import { type Device, type ProjectSummary, readDevice, readGit, readLinkedFolders, resolveWorkspace, samePath } from "./workspace.js"
 
 export interface DoctorIo {
   readonly write: (text: string) => void
   /** The projects that the API key can see. */
   readonly listProjects: () => Promise<ReadonlyArray<ProjectSummary>>
   readonly nodeVersion: string
+  /** The newest capy-acp on npm, or undefined when npm cannot be reached. */
+  readonly latestVersion: () => Promise<string | undefined>
+}
+
+/** True when version `a` is older than `b`. Both are plain `major.minor.patch`. */
+const older = (a: string, b: string) => {
+  const parts = (v: string) => v.split(".").map((n) => Number.parseInt(n, 10) || 0)
+  const [x, y] = [parts(a), parts(b)]
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  return false
 }
 
 const message = (error: unknown) =>
@@ -29,6 +39,11 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
     io.write(`  FAIL  ${toText(problem, "        ")}\n`)
   }
   io.write(`capy-acp ${AGENT_VERSION} doctor: ${folder}\n\n`)
+
+  const latest = await io.latestVersion().catch(() => undefined)
+  if (latest === undefined) note(`capy-acp ${AGENT_VERSION}. npm could not be reached to check for a newer version.`)
+  else if (older(AGENT_VERSION, latest)) note(`capy-acp ${AGENT_VERSION}, and npm has ${latest}. \`npx -y capy-acp@latest\` runs the newest version.`)
+  else ok(latest === AGENT_VERSION ? `capy-acp ${AGENT_VERSION}, the newest version on npm.` : `capy-acp ${AGENT_VERSION} (npm has ${latest}).`)
 
   const major = Number(io.nodeVersion.replace(/^v/, "").split(".")[0])
   if (major >= 22) ok(`Node ${io.nodeVersion}`)
@@ -49,9 +64,16 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
     }
   }
 
-  await readDeviceId(config).then(
-    (deviceId) => ok(`Capy device ${deviceId}. Keep the Capy desktop app or \`capy dock\` running while you work.`),
-    (error: unknown) => fail(problemOf(error) ?? { title: "Check the Capy device", detail: message(error), steps: [] })
+  const device: Device | undefined = await readDevice(config).then(
+    (found) => {
+      const runner = found.kind === "dock" ? "`capy dock`" : found.kind === "desktop" ? "the Capy desktop app" : "the Capy desktop app or `capy dock`"
+      ok(`Capy device ${found.id}. Keep ${runner} running while you work.`)
+      return found
+    },
+    (error: unknown) => {
+      fail(problemOf(error) ?? { title: "Check the Capy device", detail: message(error), steps: [] })
+      return undefined
+    }
   )
 
   const [git, linked] = await Promise.all([readGit(folder), readLinkedFolders(config)])
@@ -64,7 +86,8 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
       linked,
       projects,
       mode: config.workspaceMode,
-      allowWorktreeFallback: config.allowWorktreeFallback
+      allowWorktreeFallback: config.allowWorktreeFallback,
+      device: device?.kind
     })
     if (resolution._tag === "Unresolved") {
       fail(resolution.problem)
@@ -75,14 +98,14 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
       const listed = linked.some((f) => samePath(f.realRoot ?? f.root, gitRoot) || samePath(f.root, gitRoot))
       if (workspace.kind === "worktree") ok(resolution.value.note ?? "Capy works in a new worktree for each session.")
       else if (listed) ok("The folder is linked to this device. Capy edits it in place.")
-      else note(`The local list of linked folders does not show this folder. Capy checks it when the first thread starts. If Capy refuses it:\n${toText(notLinked, "        ")}`)
+      else note(`The local list of linked folders does not show this folder. Capy checks it when the first thread starts. If Capy refuses it:\n        ${toText(notLinked, "        ")}`)
     }
   }
 
   io.write(
     problems === 0
       ? "\nReady. In your ACP client, add an agent with the command `npx` and the arguments `-y capy-acp`.\n" +
-          "Steps for each client: https://github.com/yazcaleb/capy-acp#add-capy-to-your-editor\n"
+          "Steps for each client: https://github.com/yazcaleb/capy-acp#setup\n"
       : `\n${problems === 1 ? "1 problem" : `${problems} problems`} to fix. Then run \`npx -y capy-acp --doctor\` again.\n`
   )
   return problems === 0 ? 0 : 1

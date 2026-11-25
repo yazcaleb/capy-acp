@@ -34,8 +34,8 @@ The adapter also does these things:
 - Sessions stay available after a restart. `session/load` replays the thread transcript, and `session/resume` connects again
   without a replay. `session/list` lists the saved sessions. The next prompt continues the same Capy thread.
 - If the connection drops, the adapter connects again and continues from the last event. It shows each event one time.
-- If the setup has a problem, the reply tells you how to fix it. Examples are a missing API key, a folder that is not linked,
-  or a repository that is not in a Capy project. Fix the problem and send the message again. You do not need a new session or a
+- If the setup has a problem, the reply tells you how to fix it. Examples are a key that Capy rejects, a folder that is not
+  linked, or a repository that is not in a Capy project. (Without a key, the client shows the agent as signed out.) Fix the problem and send the message again. You do not need a new session or a
   restart.
 
 ## Permissions
@@ -49,12 +49,16 @@ message or in `AGENTS.md`, or change the Capy settings. The Capy docs say that C
 - Node 22 or later.
 - A Capy device on this machine. Sign in to the Capy desktop app, or run the headless `capy dock`.
 - A clone of a GitHub repository that is in a Capy project. Any git remote of the clone can name the repository.
-- The folder of that clone, linked to this device. Use one of these:
-  - Capy settings: Projects, then your project, then Project folders.
-  - Scan a folder in the Capy desktop app.
-  - `capy dock dirs add <path>`, while the dock is stopped.
+- The folder of that clone, linked to this device. Only the device can link a folder, so the Capy website cannot do it:
+  - Desktop app: open the project in Settings, then Projects (`capy://app/settings/projects/<project id>` opens it), set it
+    up on this computer, and choose the folder. Scan a folder also works.
+  - `capy dock`: stop the dock, run `capy dock dirs add <path>`, and start the dock again. Stopping the dock stops the Capy
+    threads that run on this computer.
+
+  If Capy links another clone of the same repository on this computer, the first reply names that folder.
 - A Capy API key. Create one in the Capy app under Settings, then API. To save it, run `npx -y capy-acp --setup`. The command
-  checks the key with Capy and writes it to `~/.config/capy-acp/api-key` with mode 0600. You can also set `CAPY_API_KEY`.
+  checks the key with Capy and writes it to `~/.config/capy-acp/api-key` with mode 0600. It also reads the key from a pipe,
+  for scripts: `capy-acp --setup < key-file`. You can also set `CAPY_API_KEY`.
 
 ## Setup
 
@@ -71,7 +75,28 @@ In **other ACP clients**, set the agent command to `npx -y capy-acp`. Set the wo
 folder. The tests used only T3 Code as a client.
 
 capy-acp announces `capy-acp --setup` as a terminal auth method. A client that supports terminal auth can run the setup for
-you.
+you. Until a key is saved, `session/new` fails with `auth_required`, so T3 Code shows the agent as signed out and offers
+the setup.
+
+To give the key in T3 Code instead, add `CAPY_API_KEY` to the environment of the provider instance. In
+`~/.t3/userdata/settings.json`, the instance takes `environment: [{ "name": "CAPY_API_KEY", "value": "…", "sensitive": true }]`.
+The other [settings](#settings) go in the same list.
+
+### Install without npx
+
+`npx -y capy-acp` downloads the newest version when its cache is empty. To pin a version, install it in a folder of its own and
+run that copy:
+
+```sh
+npm install --prefix ~/.local/opt/capy-acp capy-acp@0.1.0
+```
+
+Then set the command to `node` with the argument `~/.local/opt/capy-acp/node_modules/capy-acp/dist/bin.js`, as an absolute
+path. Use the absolute path of `node` too if your editor does not start from a login shell. A version manager such as fnm can
+give `which node` a path that changes in each shell, so use the path of the installed Node version instead.
+
+On **Windows**, T3 Code starts the command without a shell and refuses `.cmd` files such as `npx.cmd`. Set the command to the
+absolute path of `node.exe`, with the absolute path of `dist\bin.js` as the argument.
 
 ## Settings
 
@@ -130,15 +155,16 @@ CI runs the unit tests on Linux. The unit tests also pass on macOS and Windows. 
 ## Troubleshooting
 
 Run `npx -y capy-acp --doctor` in the project folder. It checks Node, the API key, the device and the folder, and prints a
-fix for each problem. The adapter writes its log to stderr. These are common first replies:
+fix for each problem. It also says if npm has a newer capy-acp. The adapter writes its log to stderr. These are common first replies:
 
 | Reply | Fix |
 | --- | --- |
-| `No Capy API key` | Run `npx -y capy-acp --setup`, or set `CAPY_API_KEY`. Then send the message again |
-| `No paired Capy device found` | Sign in to the Capy desktop app, or run `capy dock`. Or set `CAPY_DEVICE_ID`, and `CAPY_DESKTOP_CONFIG_DIR` or `CAPY_HOME` |
-| `… is not in a git repository`, or `… has no git remote that names a GitHub repository` | Open the folder of a clone. One of its remotes must name the GitHub repository |
-| `No Capy project includes owner/repo` | Add the repository to a Capy project |
-| `… is not a linked folder on this Capy device` | Link the folder in Capy as the reply tells you. Then send the message again |
+| T3 Code shows the agent as signed out | Run `npx -y capy-acp --setup`, or set `CAPY_API_KEY` |
+| **Start Capy on this computer** | Sign in to the Capy desktop app, or run `capy dock`. The reply lists each file that capy-acp read. Or set `CAPY_DEVICE_ID`, and `CAPY_DESKTOP_CONFIG_DIR` or `CAPY_HOME` |
+| **Open a repository to use Capy**, or **Add the GitHub remote** | Open the folder of a clone. One of its remotes must name the GitHub repository |
+| **Add owner/repo to a Capy project** | Add the repository to a Capy project |
+| **Link this folder to Capy** | Link the folder as the reply tells you. Then send the message again |
+| **Use the folder that Capy links for owner/repo** | Open the folder that the reply names, link this folder instead, or set `CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1` |
 | `Capy has not started on this message yet` | Make sure that the Capy desktop app or `capy dock` runs and is signed in. The message stays in the thread queue |
 
 ## Development

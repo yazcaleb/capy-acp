@@ -6,7 +6,7 @@
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import type { AdapterConfig } from "./config.js"
-import { readDeviceId } from "./workspace.js"
+import { readDevice } from "./workspace.js"
 
 /** The terminal auth method that `initialize` announces. */
 export const API_KEY_AUTH = {
@@ -56,8 +56,8 @@ export const runSetup = async (config: AdapterConfig, io: SetupIo): Promise<numb
       ? "Capy accepted the key. Saved.\n"
       : `Saved, but capy-acp could not check the key with Capy (${check}).\n`
   )
-  await readDeviceId(config).then(
-    (deviceId) => io.write(`Capy device on this machine: ${deviceId}.\n`),
+  await readDevice(config).then(
+    (device) => io.write(`Capy device on this machine: ${device.id}.\n`),
     (error: unknown) => io.write(`${error instanceof Error ? error.message : String(error)}\n`)
   )
   return 0

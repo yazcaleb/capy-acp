@@ -29,6 +29,7 @@ const machine = (env: Record<string, string> = {}) => {
   execFileSync("git", ["-C", repo, "remote", "add", "origin", "git@github.com:acme/app.git"])
   mkdirSync(join(home, "capy", "device"), { recursive: true })
   writeFileSync(join(home, "capy", "device", "workspaces.json"), JSON.stringify({ folders: [{ root: repo, repos: ["acme/app"] }] }))
+  writeFileSync(join(home, "api-key"), "capy_test\n", { mode: 0o600 })
   const config = readConfig({
     CAPY_DEVICE_ID: "device_TEST",
     CAPY_HOME: join(home, "capy"),
@@ -125,12 +126,16 @@ describe("agent sessions", () => {
     await dispose()
   })
 
-  it.skipIf(process.env.CAPY_API_KEY !== undefined)("answers authenticate once a key is saved, and asks for setup before", async () => {
-    const { config, home } = machine()
+  it.skipIf(process.env.CAPY_API_KEY !== undefined)("asks for sign-in until a key is saved, so clients show the agent as signed out", async () => {
+    const { config, home, repo } = machine()
+    rmSync(join(home, "api-key"))
     const { agent, close } = await connect(config, fakeCapy({ creates: [], sends: [], streams: [] }, []))
     await expect(agent.request(acp.methods.agent.authenticate, { methodId: "capy-api-key" })).rejects.toThrow(/capy-acp --setup/)
+    // T3 Code reads auth_required (-32000) from session/new as "signed out" and offers the terminal method.
+    await expect(agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })).rejects.toMatchObject({ code: -32000 })
     writeFileSync(join(home, "api-key"), "capy_test\n", { mode: 0o600 })
     await expect(agent.request(acp.methods.agent.authenticate, { methodId: "capy-api-key" })).resolves.toBeDefined()
+    await expect(agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })).resolves.toHaveProperty("sessionId")
     await close()
   })
 
@@ -193,7 +198,7 @@ describe("agent sessions", () => {
     await client.close()
   })
 
-  it("answers a missing API key in the reply, and picks the key up without a restart", async () => {
+  it("answers a key that Capy cannot use in the reply, and picks up the fix without a restart", async () => {
     const { repo, config } = machine()
     const log: Log = { creates: [], sends: [], streams: [] }
     let key = false
@@ -234,7 +239,8 @@ describe("agent sessions", () => {
     const reply = client.updates.flatMap((u) => (u.sessionUpdate === "agent_message_chunk" && u.content.type === "text" ? [u.content.text] : [])).join("")
     expect(reply).toContain("**Link this folder to Capy**")
     expect(reply).toContain(`${repo} is not linked`)
-    expect(reply).toContain("https://capy.ai/settings/projects")
+    expect(reply).toContain("capy://app/settings/projects/project_TEST")
+    expect(reply).toContain(`capy dock dirs add ${repo}`)
     // The user links the folder in Capy; the local list stays empty.
     linked = true
     await client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text: "hello" }] })

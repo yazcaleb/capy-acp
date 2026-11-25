@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { desktopConfigDir, readConfig } from "../src/config.js"
-import { parseRemote, readDeviceId, readGit, resolveWorkspace, samePath } from "../src/workspace.js"
+import { parseRemote, readDevice, readGit, resolveWorkspace, samePath } from "../src/workspace.js"
 import { problemOf } from "../src/problems.js"
 
 const dirs: Array<string> = []
@@ -52,6 +52,33 @@ describe("resolveWorkspace", () => {
     // Git prints Windows paths with forward slashes.
     const windows = resolveWorkspace({ ...base, gitRoot: "C:/Users/dev/app", linked: [], platform: "win32" })
     expect(windows).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "linked", root: "C:\\Users\\dev\\app" } } })
+  })
+
+  it("gives the link steps for how this computer is paired, and points to the clone Capy already links", () => {
+    const refusal = (input: Partial<Parameters<typeof resolveWorkspace>[0]>) => {
+      const resolution = resolveWorkspace({ ...base, linked: [], ...input })
+      return resolution._tag === "Resolved" ? resolution.value.notLinked : undefined
+    }
+    // Only the device can link a local folder, so the desktop app opens on the project, not the web page.
+    expect(refusal({ device: "desktop" })?.steps).toEqual([
+      'Open `capy://app/settings/projects/project_TEST` to show "Acme" in the Capy desktop app. Set it up on this computer and choose /w/app.',
+      "Send your message again."
+    ])
+    expect(refusal({ device: "dock" })?.steps).toEqual([
+      "Stop `capy dock`. Caution: this also stops the Capy threads that run on this computer.",
+      "Run `capy dock dirs add /w/app`, then start `capy dock` again.",
+      "Send your message again."
+    ])
+    expect(refusal({ device: undefined })?.steps).toEqual([expect.stringMatching(/^With the desktop app: /), expect.stringMatching(/^With `capy dock`: /), "Send your message again."])
+    expect(refusal({ device: "desktop", linked: [{ root: "/w/other", repos: ["acme/app"] }] })).toEqual({
+      title: "Use the folder that Capy links for acme/app",
+      detail: "On this computer, Capy links acme/app at /w/other, not at /w/app.",
+      steps: [
+        "Open /w/other in your editor, and start a new chat there.",
+        expect.stringMatching(/^Or link \/w\/app instead\. Open `capy:\/\/app\/settings\/projects\/project_TEST`.* Then send your message again\.$/),
+        expect.stringContaining("CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1")
+      ]
+    })
   })
 
   it("finds the project through any remote, or through the repositories of the linked folder", () => {
@@ -107,16 +134,20 @@ describe("readGit", () => {
   })
 })
 
-describe("readDeviceId", () => {
+describe("readDevice", () => {
   const configIn = (dir: string) => readConfig({ CAPY_DESKTOP_CONFIG_DIR: dir, CAPY_HOME: join(dir, "capy-home") })
 
   it("names both files and the ways out when Capy isn't paired here", async () => {
     const dir = mkdtempSync(join(tmpdir(), "capy-acp-device-"))
     dirs.push(dir)
-    const error = await readDeviceId(configIn(dir)).catch((e: unknown) => e)
+    const error = await readDevice(configIn(dir)).catch((e: unknown) => e)
     expect(problemOf(error)).toMatchObject({
       title: "Start Capy on this computer",
-      steps: [expect.stringContaining("capy dock"), expect.any(String), expect.stringMatching(/device-ids\.json and .*dock[/\\]status\.json.*CAPY_DEVICE_ID/)]
+      steps: [
+        expect.stringContaining("capy dock"),
+        expect.any(String),
+        expect.stringMatching(/device-ids\.json \(missing\) and .*dock[/\\]status\.json \(missing\).*CAPY_DEVICE_ID/)
+      ]
     })
   })
 
@@ -128,17 +159,17 @@ describe("readDeviceId", () => {
       join(dir, "capy-home", "dock", "status.json"),
       JSON.stringify({ pid: 1, deviceId: "device_DOCK", orgId: "org_a", state: "connected", roots: ["/w"] })
     )
-    expect(await readDeviceId(configIn(dir))).toBe("device_DOCK")
+    expect(await readDevice(configIn(dir))).toEqual({ id: "device_DOCK", kind: "dock" })
     writeFileSync(join(dir, "device-ids.json"), JSON.stringify({ orgs: { org_a: "device_APP" } }))
-    expect(await readDeviceId(configIn(dir))).toBe("device_APP")
+    expect(await readDevice(configIn(dir))).toEqual({ id: "device_APP", kind: "desktop" })
   })
 
   it("reads the one paired device, and asks to choose between several", async () => {
     const dir = mkdtempSync(join(tmpdir(), "capy-acp-device-"))
     dirs.push(dir)
     writeFileSync(join(dir, "device-ids.json"), JSON.stringify({ orgs: { org_a: "device_A" } }))
-    expect(await readDeviceId(configIn(dir))).toBe("device_A")
+    expect(await readDevice(configIn(dir))).toEqual({ id: "device_A", kind: "desktop" })
     writeFileSync(join(dir, "device-ids.json"), JSON.stringify({ orgs: { org_a: "device_A", org_b: "device_B" } }))
-    await expect(readDeviceId(configIn(dir))).rejects.toThrow(/Choose a Capy organization/)
+    await expect(readDevice(configIn(dir))).rejects.toThrow(/Choose a Capy organization/)
   })
 })
