@@ -23,6 +23,9 @@ it.
 - Files that Capy attaches to a reply, as links. A file that Capy made on this machine links to its local path. Other files link
   to a Capy download URL, which expires.
 - Capy subagents, as items that show their status: pending, running, completed or failed.
+- The models of your Capy account. A model that Capy bills to credits shows its price, for example
+  `Inkling 2 Small · $0.30/$1.00 per 1M`, or `Particle-1 · free`. After a turn that used Capy credits, a notice gives the
+  amount.
 
 The adapter also does these things:
 
@@ -76,9 +79,10 @@ you.
 | --- | --- | --- |
 | `CAPY_API_KEY` | (unset) | The Capy API key. The adapter reads it for each request, so a new key needs no restart |
 | `CAPY_API_KEY_FILE` | `~/.config/capy-acp/api-key` | The file with the key, if `CAPY_API_KEY` is not set |
+| `CAPY_ACP_PRICING_URL` | `https://docs.capy.ai/models-and-pricing.md` | The page with the model price table. An empty value turns the prices off |
 | `CAPY_ACP_MODEL` | `anthropic/claude-opus-5-5` | The first model of a session. The model picker lists all models of your Capy account and labels the models that Capy bills to credits |
 | `CAPY_ACP_REASONING` | `high` | The first reasoning level. If a model does not offer this level, the adapter uses the last level that the model lists |
-| `CAPY_ACP_WORKSPACE` | `linked` | `linked`: Capy edits the folder that you opened. `worktree`: each session gets a new Capy worktree, under `~/.capy/worktrees`. The diffs show the files there |
+| `CAPY_ACP_WORKSPACE` | `linked` | `linked`: Capy edits the folder that you opened. `worktree`: each session gets a new Capy worktree, in the worktree folder of Capy (`~/.capy/worktrees` by default). The diffs show the files there |
 | `CAPY_ACP_ALLOW_WORKTREE_FALLBACK` | off | For a clone that is not linked, use a worktree of a linked folder of the same repository |
 | `CAPY_ACP_WAITING_LIMIT_MS` | `600000` | The time that a prompt stays open while Capy waits for a background command |
 | `CAPY_ACP_FORWARD_HOST_INSTRUCTIONS` | off | Send the host instructions from T3 Code to Capy. Without this setting, the adapter sends only the request of the user |
@@ -125,7 +129,8 @@ CI runs the unit tests on Linux. The unit tests also pass on macOS and Windows. 
 
 ## Troubleshooting
 
-The adapter writes its log to stderr. These are common first replies:
+Run `npx -y capy-acp --doctor` in the project folder. It checks Node, the API key, the device and the folder, and prints a
+fix for each problem. The adapter writes its log to stderr. These are common first replies:
 
 | Reply | Fix |
 | --- | --- |
@@ -146,8 +151,8 @@ node spike/acp-client.ts <folder> "<prompt>" ["<follow-up>"] [--cancel-after-ms 
 ```
 
 The tests replay recorded Capy streams from `fixtures/`. They operate the agent over a real ACP connection with a fake Capy
-client. [`docs/capy-api-notes.md`](docs/capy-api-notes.md) records what the recordings showed about the Capy API, the design
-decisions, and feedback for the API.
+client. [`docs/design.md`](docs/design.md) explains how the adapter works around the Capy API, and
+[`docs/capy-api-notes.md`](docs/capy-api-notes.md) is the feedback for Capy: ranked asks, with evidence from the recordings.
 
 ## License
 

@@ -207,4 +207,24 @@ describe("worktree tracker", () => {
       writeFileSync(join(worktree, "src", "app.ts"), "export const a = 2\n")
       expect((yield* tracker.collect).map((c) => c.relativePath)).toEqual(["src/app.ts"])
     }))
+
+  it.effect("finds a worktree in a folder that the user chose, from Capy's worktree list", () =>
+    Effect.gen(function*() {
+      const { home, worktree } = capyHome()
+      // Capy 0.9.2 and later: Settings, then Devices, then Worktree folder.
+      const elsewhere = mkdtempSync(join(tmpdir(), "capy-acp-wt-"))
+      roots.push(elsewhere)
+      const thread = join(elsewhere, "jam_U")
+      mkdirSync(thread)
+      execFileSync("git", ["clone", "-q", "-c", "core.autocrlf=false", worktree, join(thread, "app")], { stdio: "pipe" })
+      mkdirSync(join(home, "device"), { recursive: true })
+      writeFileSync(
+        join(home, "device", "workspaces.json"),
+        JSON.stringify({ folders: [], worktrees: [{ root: thread, createdJamId: "jam_U", state: "ready" }] })
+      )
+      const tracker = makeWorktreeTracker(home, "acme/app", () => "jam_U")
+      yield* tracker.baseline
+      writeFileSync(join(thread, "app", "README.md"), "# demo\nmoved\n")
+      expect(yield* tracker.collect).toMatchObject([{ path: join(thread, "app", "README.md"), operation: "modify" }])
+    }))
 })

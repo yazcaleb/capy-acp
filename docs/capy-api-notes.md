@@ -1,370 +1,310 @@
 # Capy API notes
 
-This file records what the work on capy-acp showed about the Capy public API, and the design decisions that followed. All
-observations are from November 2026, against `https://api.capy.ai/api/v1`. The first device was the Capy desktop app 0.6.0 on
-Linux x64, and the client was T3 Code nightly 0.1.12. Later checks used `capy dock` 0.7.2 on macOS and Windows. The recorded
-streams are in `fixtures/<model>/<scenario>/`. `spike/scrub-fixtures.ts` removed private data from them.
+Feedback on the Capy public API from building [capy-acp](../README.md), which runs Capy device threads from any Agent Client
+Protocol (ACP) client. The goal is one client integration that puts Capy in T3 Code, Zed, JetBrains IDEs, Neovim, Emacs and
+the other ACP editors. Device threads run on the user's own machine and subscriptions, so they use no Capy machine time.
 
-## Answers
+capy-acp is a community project. Capy did not make it.
+
+**The short version.** The API was enough to build a working adapter: streaming, resume, cancel, files, subagents and
+diffs work on Linux, macOS and Windows. Seven changes would remove almost all of its workarounds. The first one matters most:
+a public, read-only way to find the device on this machine and the folders it links. Today every integrator has to read
+private Capy files to get them.
+
+Each claim below cites a recording in `fixtures/`, a live API response, or a docs page. All were checked again on
+2026-11-25. Thread ids and timestamps for any item are available on request, so you can match them to server logs.
+
+## Contents
+
+- [What works well](#what-works-well)
+- [The asks, ranked](#the-asks-ranked)
+- [Small fixes](#small-fixes)
+- [What I take to be intended](#what-i-take-to-be-intended)
+- [Questions](#questions)
+- [Reference](#reference)
+- [How this was tested](#how-this-was-tested)
+
+## What works well
+
+- **Device threads through the public API.** `POST /threads` with `device: {deviceId, workspace}` starts a thread on the
+  user's machine. On a connected subscription the runs cost 0 credits.
+- **Linked mode.** `{kind: "linked", root}` edits the open folder in place, which is what an editor user expects.
+- **Resume.** `Last-Event-ID` resumes a stream exactly. No recording replayed an old event.
+- **Idempotent sends.** `clientKey` makes a retried prompt safe.
+- **Errors.** Errors before the stream are tagged JSON (`capy/ThreadNotFound`, `ModelSelection.Rejected`, ...), so a client
+  can turn them into a fix for the user.
+- **`until=run` with `done`.** This is the one reliable way to know that a run's entries are committed.
+- **Docs for machines.** Each docs page has a `.md` twin, and `llms-full.txt` and `openapi.json` exist. The checks in this
+  file used them.
+
+## The asks, ranked
+
+| # | Ask | What the user sees today | What capy-acp does instead |
+| --- | --- | --- | --- |
+| 1 | Find the device and its linked folders | Setup fails when Capy moves a local file. An unlinked folder is found only after the first prompt fails | Reads `device-ids.json`, `~/.capy/dock/status.json` and `~/.capy/device/workspaces.json`, then sends a root and matches the 400 message with a regex |
+| 2 | A turn-commit and cursor contract | Without care: the last reply shows again on the next turn, or a reply is lost after a reload | Waits for `done` on an `until=run` stream, with a 10 s grace timer, then checks `GET /threads/{id}`. Saves the cursor after every frame |
+| 3 | Tool call detail and status | "write, bash (1.6 s)" with no command, no output and no changed files. A stopped call can look finished | 288 lines of git diffing (`src/changes.ts`). Guesses the outcome of a stopped call |
+| 4 | Where a thread runs | Diffs disappear if the thread moves to another machine | Finds the worktree in the private worktree list of `workspaces.json`, or at `~/.capy/worktrees/<threadId>/<repo>` |
+| 5 | Files on thread create | "No image came through", then a second answer when the image arrives | Saves the files on the device and sends their paths in the text |
+| 6 | Prices and input types on `GET /models` | A picker that cannot say which models are free, or which accept images | Parses the price table of the docs page. Offers images for every model |
+| 7 | Token usage on `turn end` | No context or usage meter | Shows credits after a turn from `GET /threads/{id}`. Sends no ACP usage update |
+
+### 1. Find the device and its linked folders
+
+**Today.** No public endpoint lists devices (`GET /devices` answers `404 capy/RouteNotFound`). `GET /folders` exists, but
+its folders are sidebar folders for threads, not device folders. A client finds the device id in one of two private files,
+and a different one for each way to pair a machine:
+
+- The desktop app writes `device-ids.json` in its Electron user data folder, one id for each organization. The folder name
+  changes with the release channel (`Capy`, `Capy Nightly`, `Capy Dev`).
+- `capy dock` writes `~/.capy/dock/status.json`.
+
+The linked folders are in `~/.capy/device/workspaces.json`, which the app writes again from server state. The local copy
+can be out of date, so capy-acp sends the root anyway and reads the answer:
+`400 capy/InvalidRequest "This device does not link a folder at <path>"`.
+
+**Cost.** `readDeviceId` and `readLinkedFolders` in `src/workspace.ts`, a `CAPY_DEVICE_ID` setting for users in more than
+one organization, and a regex on an error message (`isNotLinked` in `src/agent.ts`). The next Capy release that moves a file
+breaks every integration that does this.
+
+**Proposal.** Linking a local path from a cloud API is a security decision, so linking should stay on the machine (app or
+`capy dock dirs add`). Listing is the part that integrations need:
+
+```http
+GET /devices
+→ { "items": [{ "id": "device_…", "name": "…", "platform": "linux" | "darwin" | "win32",
+                "kind": "desktop" | "dock", "online": true, "lastSeenAt": "…" }] }
+
+GET /devices/{id}/folders
+→ { "items": [{ "root": "/home/me/app", "repos": ["acme/app"] }] }
+```
+
+A client also needs to know which device is the machine that it runs on. An API key cannot tell. A documented local command
+would be enough, for example `capy device --json` → `{deviceId, orgId, folders, worktreeBase}`, with the same output from
+the app and the dock.
+
+### 2. A turn-commit and cursor contract
+
+This combines three problems with the same root: a client cannot tell when a turn's entries are durable, or what its resume
+cursor is.
+
+**Commit timing.** Capy commits each transcript entry about one model step after its live frames. The final reply commits
+after the closing `status: idle` in 4 of the 7 recorded runs that ended with a reply: Haiku `s1-write`, Opus `s2-edit`,
+Astra `s1-write` and Astra `s2-edit`. A client that ends the turn on `idle` saves a cursor that is one entry short, and the next
+turn shows the last reply again. capy-acp had exactly this bug.
+
+**Position.** `GET /threads/{id}/messages` ends with `cursor: null`, and its tool entries carry the call id, not the event
+id. In the fixture `fixtures/anthropic_claude-opus-5-5/s1-write/stream.sse`, a tool entry has `id: toolu_01Ds…` in its data
+and `01M84218Z7…` as its SSE id. After a restart, a client cannot find out where to resume from the message list.
+
+**Run and turn frames.** In 4 of 9 recorded streams there is no `run start` (all three Astra streams, and the Opus
+follow-up). The four streams opened right after a thread was created on a Claude model start with `turn end` `aborted` and
+`run end` before `run start`. A client cannot use these frames to mark a turn. This may be a replay of the previous run's
+end, which would be fine if the docs said so.
+
+**Cost.** A 10 s grace timer after `idle` (`END_GRACE_MS` in `src/turn.ts`), a `GET /threads/{id}` check when the stream
+closes, a cursor write after every frame, and a load that moves the cursor to the newest replayed entry.
+
+**Proposal.**
+
+```text
+turn end / run end      + "lastEventId": "<event id of the last entry committed so far>"
+GET /threads/{id}       + "latestEventId": "…"
+GET /threads/{id}/messages items  + "eventId": "…"   (the id to pass as Last-Event-ID)
+docs                    which frames a new stream can repeat from an earlier run
+```
+
+### 3. Tool call detail and status
+
+**Today.** Claude Opus 5.5 and GPT-6.2 Astra call tools through an `execute` wrapper. Its live frame is
+`{"name": "execute", "text": ""}`, and its transcript entry has `calls: [{tool, durationMs}]`. Haiku 5.5 calls `bash`
+directly and gets a one-line summary. No frame gives a command, a path, an exit code or output. A call that an interrupt
+stopped is committed like a finished call. The only sign is a missing `calls` list on an `execute` entry, and Haiku entries
+never have `calls`, so after a cancel their outcome is unknown.
+
+**What the user sees.** A tool item titled "write, bash (1.6 s)". Without the adapter's own diffs, the changed files would
+not show at all.
+
+**Cost.** `src/changes.ts` records a git baseline before each prompt and compares the folder at each tool call boundary. It
+handles CRLF, smudge filters and LFS, and still cannot tell a user's edit from Capy's while a writing call runs.
+
+**Proposal.** Even `status` and `paths` alone would remove most of this.
+
+```json
+"calls": [{
+  "tool": "bash",
+  "status": "completed" | "failed" | "interrupted",
+  "durationMs": 347,
+  "summary": "git status --short",
+  "exitCode": 0,
+  "paths": [{ "path": "README.md", "change": "modified" }]
+}]
+```
+
+The same `summary` on the live `tool_call` frame of an `execute` call would give the editor something to show while the
+call runs.
+
+### 4. Where a thread runs
+
+**Today.** `GET /threads/{id}` returns 30 fields, and none of them says where the thread runs. capy-acp looks for the thread's
+worktree at `~/.capy/worktrees/<threadId>/<repo>`. Two recent changes make that weaker:
+
+- Since 0.9.2 a user can choose another worktree folder (Settings, then Devices, then Worktree folder). capy-acp now reads
+  the private worktree list in `~/.capy/device/workspaces.json` to find it, which is one more private file to depend on. The
+  docs for the desktop app and the dock still say `~/.capy/worktrees`.
+- Since 0.9.0 a thread can move to another device or to the cloud ("Continue on"). The API does not report the move, so a
+  client can keep watching a folder that the thread left.
+
+**Proposal.**
+
+```json
+"placement": {
+  "kind": "device",
+  "deviceId": "device_…",
+  "workspace": { "kind": "linked" | "worktree", "root": "/home/me/app", "path": "/home/me/app" }
+}
+```
+
+A stream frame when the placement changes would let a client follow a move.
+
+### 5. Files on thread create
+
+**Today.** `CreateThreadRequest.message` is a string. Files attach only to `POST /threads/{id}/message`. If a client sends
+the files right after creating the thread (`delivery: "steer"`), a fast model can answer first. In a live test, Opus
+answered "No image came through", then answered again when the image arrived.
+
+**Cost.** capy-acp saves the files of a first prompt on the device and puts their paths in the text, so the agent reads them
+from disk. This works only for device threads.
+
+**Proposal.** The same `files` field as `SendMessageRequest`, on create.
+
+### 6. Prices and input types on `GET /models`
+
+**Today.** A model has `id`, `name`, `billing`, `route`, `reasoningModes`, `fast`, `pro` and `ultrafast`. It has no price, no
+input types and no context window. The prices exist on the docs page "Models & pricing".
+
+**Cost.** capy-acp downloads `docs.capy.ai/models-and-pricing.md` and parses its table (`src/pricing.ts`), so the picker can
+say "Particle-1 · free" or "Inkling 2 Small · $0.30/$1.00 per 1M". If the table changes, the label falls back to
+"Capy credits". capy-acp offers image prompts for every model, because it cannot tell which accept them.
+
+**Proposal.**
+
+```json
+"pricing": { "inputPerMTok": 0.30, "cachedInputPerMTok": 0.03, "outputPerMTok": 1.00, "currency": "USD" },
+"inputModalities": ["text", "image"],
+"contextWindow": 1048576
+```
+
+`pricing` would be `null` for models on a subscription or the user's key.
+
+### 7. Token usage on `turn end`
+
+**Today.** The stream gives no usage. `Thread.usage` gives credits for the whole thread (llm, image, vm, total).
+`GET /usage/series` gives token totals in hourly buckets that can still change. ACP's `usage_update` needs the tokens in
+context and the context size, so capy-acp sends none. After each turn it reads `Thread.usage` and shows the credits that the
+turn added, if any.
+
+**Proposal.** `turn end` + `usage: {inputTokens, outputTokens, cacheReadTokens, contextTokens, contextWindow, credits}`.
+
+## Small fixes
+
+- **`null` where the schema says optional.** The message list sends `clientKey`, `editOf`, `sender`, `modelDefault`,
+  `attachments` and `references` as `null`. The published `Message` schema marks them optional and not nullable, and the
+  stream leaves them out. A client that decodes with the published schema fails on a whole page. capy-acp's `session/load`
+  did, until it switched to decoding one field at a time.
+- **An untagged error.** `GET /threads/{id}/messages?after=<bad cursor>` answers `400` with an empty body. The stream answers
+  the same mistake with `capy/InvalidRequest "Invalid event cursor"`.
+- **Tags for device errors.** "Device not found" and "This device does not link a folder at …" are both
+  `capy/InvalidRequest`. Tags such as `capy/DeviceNotFound` and `capy/FolderNotLinked {root}` would let a client react
+  without parsing the message. `capy/DeviceAccessDenied` exists on `POST /threads/{id}/message`, but not on thread create.
+- **The credit unit is not documented.** The Capy app shows `totalCredits / 1000` as dollars. The API reference does not say
+  so.
+- **Undocumented fields.** `DeviceTarget` accepts `roots`, `base`, `repos`, `startFromOrigin` and `root` (worktree), with no
+  description.
+- **The interrupt receipt.** The reference gives its shape (`AdmitReceipt {id, deduped}`) but not what `id` names, or when
+  `deduped` is true without a `clientKey`.
+- **Worktree folder in the docs.** The desktop and dock pages still say `~/.capy/worktrees` (see ask 4).
+
+## What I take to be intended
+
+- The stream never gives the model's reasoning. The docs say so.
+- Capy opens a pull request only when asked. No recording showed a commit or a PR without a request.
+- There is no per-tool approval, so ACP permission requests have nothing to map to. capy-acp never asks the client for
+  permission, and its README says so.
+- The free-with-ads models are only for the app. They are not in the API's model list.
+- Live fragments are small (1 to 38 characters, median 3 for Astra and 13 for Opus). The `dropped` turn outcome covers slow
+  readers.
+
+## Questions
+
+1. An interrupt during a reply ends the turn with `outcome: "settled"`, not `aborted` (`fixtures/anthropic_claude-opus-5-5/s4-interrupt`).
+   Is `settled` the intended outcome for an interrupt?
+2. Is the `turn end aborted`, `run end` pair at the start of a new thread's stream a replay of something? (Ask 2.)
+3. Since 0.9.0 a thread started in the app can clone a missing repository on the device. Does an API thread in worktree mode
+   do the same, or does it still need a linked folder of the repository?
+4. `SendMessageRequest.delivery` defaults to `interrupt`. Which delivery should a client use for a follow-up while the thread
+   is still `waiting` on a background command, so that the command is not cancelled? `queue`?
+
+## Reference
+
+### Answers
 
 | Question | Answer | Evidence |
 | --- | --- | --- |
-| Do device threads work through the API? | Yes. `device: {deviceId, workspace: {kind: "worktree"}}` creates a detached git worktree at `origin/<base>`, under `~/.capy/worktrees/<threadId>/<repo>`. Capy makes it from the `.git` folder of the linked folder. | All `fixtures/*/s*` |
-| Must a `linked` root be a linked folder of the device? | Yes. Capy rejects any other path with `400 capy/InvalidRequest "This device does not link a folder at <path>"`. | Recorded error |
-| Does `linked` mode work? | Yes. If the folder is linked, `{kind: "linked", root}` runs in that folder (`pwd` is the root). Capy edits the files in place and creates no worktree. The stream has the same frames as in worktree mode. | `fixtures/anthropic_claude-opus-5-5/s2-edit-linked` |
-| Can a client link a folder without the app UI? | Not through a public API. `~/.capy/device/workspaces.json` is a cache. The app writes it again from server state, so manual edits do not stay. Deep links (`capy://app/<route>`) only open screens in the app. You link folders in the Capy UI, or with `capy dock dirs add`. | Observed |
-| Must the repository be in a Capy project? | Yes. Thread create requires `projectId`. A linked folder lists its `repos`. Capy makes the worktree from the base branch of the project repository. | Create schema |
-| Does a thread commit or open a PR without a request? | No recording showed this. All 3 models obeyed "do not commit, push, or open a PR". Each worktree stayed at the base commit, with uncommitted changes. The docs say that Capy opens a PR only on request. No API flag controls this. | `git status` after each run |
-| Does the stream show edits and shell commands? | It depends on the model (see below). No frame gives a path, a diff, a command or command output. | `s2-edit` |
-| How does Capy report errors? | Before the stream starts, as tagged JSON bodies. After the stream starts, as `error` frames. See "Errors". | `fixtures/errors/` |
-| What did the runs cost? | 0 Capy credits for all recorded runs (`usage.totalCredits = 0`). Device threads have no machine charge, and these models used connected subscriptions. | `thread.json` |
+| Do device threads work through the API? | Yes. `device: {deviceId, workspace: {kind: "worktree"}}` creates a detached git worktree of the base branch from the remote, by default under `~/.capy/worktrees/<threadId>/<repo>`. | `fixtures/*/s1-write`, `*/s2-edit`, and the `.capy-managed.json` marker (`forkedFrom: "remote"`) |
+| Must a `linked` root be a linked folder of the device? | Yes. Capy rejects other paths with `400 capy/InvalidRequest "This device does not link a folder at <path>"`. | Live, 2026-11-23 (the body was not saved as a fixture) |
+| Does `linked` mode work? | Yes. The thread runs in the root (`pwd` is the root) and edits it in place, with no worktree. The frames are the same as in worktree mode. | `fixtures/anthropic_claude-opus-5-5/s2-edit-linked` |
+| Can a client link a folder? | Not through the API. Folders are linked in the app (Scan a folder, or Settings, then Project folders) or with `capy dock dirs add`. | `openapi.json` |
+| Must the repository be in a Capy project? | Yes. Thread create requires `projectId`. | `openapi.json` |
+| Does a thread commit or open a PR without a request? | Not in any recording. All 3 models obeyed "do not commit, push, or open a PR". | `git status` after each run |
+| What did the runs cost? | 0 credits (`usage.totalCredits = 0`) on connected subscriptions. | `fixtures/*/*/thread.json` |
 
-## Models and billing (`GET /models`)
+### Model routes
 
-Each model has a `route` and a `billing` label. A model on a `member_seat` or `member_credential` route uses the subscription of
-the member. A model on the `capy` route uses Capy credits. capy-acp lists all models in the model picker of the session. It adds
-"(Capy credits)" to the label of each `capy` route model.
+`route` is `capy` (Capy credits), `org_credential` (an organization key), `member_credential` (the member's own key) or
+`member_seat` (a connected subscription). capy-acp adds a price to the name of `capy` models only.
 
-| Model id | Reasoning level | `route` | Use in the recordings |
+| Model id | Reasoning | Route in the recordings | Tool frames |
 | --- | --- | --- | --- |
-| `anthropic/claude-opus-5-5` | high | `member_seat` | Baseline for the translator |
-| `openai/gpt-6.2-astra` | high | `member_seat` | Second provider |
-| `anthropic/claude-haiku-5-5` | low | `member_seat` | Smoke test |
+| `anthropic/claude-opus-5-5` | high | `member_seat` | `execute`, empty `text`, `calls` with `bash` and `write` |
+| `openai/gpt-6.2-astra` | high | `member_seat` | `execute`, empty `text`, `calls` with `bash` and `apply_patch`. Sends a short message before its tools |
+| `anthropic/claude-haiku-5-5` | low | `member_seat` | `bash` with a one-line summary, no `calls` |
 
-## Event stream
-
-The scenarios are:
-
-- `s1-write`: write one file, then run `git status`.
-- `s2-edit`: read the README, edit two files, then run `git status` and `git diff --stat`.
-- `s3-followup`: send a message, then resume the stream with `Last-Event-ID`.
-- `s4-interrupt`: interrupt a reply.
-
-### Provider differences
-
-| | Haiku 5.5 | Opus 5.5 | GPT-6.2 Astra |
-| --- | --- | --- | --- |
-| Tool frames | `tool_call.name = "bash"`, with a one-line summary in `text` | `name = "execute"`, with `text: ""` | `name = "execute"`, with `text: ""` |
-| Data in the transcript entry | `tool: "bash"`, and the same summary | `calls: [{tool: "bash"\|"write", durationMs}]` | `calls: [{tool: "bash"\|"apply_patch", durationMs}]` |
-| Edit tool name | (edits with bash) | `write` | `apply_patch` |
-| callId prefix | `toolu_` | `toolu_` | `call_` |
-| Replies | One final reply | One final reply | A short "I'll check…" message before the tools, then the final reply. One run has more than one `assistant` transcript entry |
-| Reasoning frames | none | none | none (the docs say that the stream never gives reasoning) |
-
-These differences have the following results in capy-acp:
-
-- Tool titles come from the `calls` list of the transcript, not from `tool_call.text`. Strong models leave `text` empty, so the
-  live frame shows only "execute". capy-acp shows a pending call as "Working…". When the transcript entry arrives, it changes the
-  title, for example to "bash, write (1.6 s)".
-- Read-only tools, search tools and fetch tools get the kinds `read`, `search` and `fetch`. Shell tools and write tools get the
-  kind `other`. Capy gives no command and no path for an `execute` or `edit` item. Real `edit` items come from the diffs (see
-  "File diffs in linked mode").
-- No paths, diffs or output come through the API. In linked mode, the device edits the folder that the client has open. So
-  capy-acp compares that folder after each tool call.
-- Each assistant `callId` is a separate message. The early Astra messages are real reply text, and capy-acp streams them as
-  chunks.
-
-### Frame order (all models)
-
-- A new stream starts with `status`. Frequently, extra frames follow: `turn start`, `turn end (aborted)`, `run end`, `run
-  start`. These run frames are not reliable. The Astra s1 and s2 streams have no `run start`. In the Opus interrupt stream,
-  `run start` comes after the reply fragments. For this reason, capy-acp controls the ACP turn from `status` and `transcript`
-  frames, not from `run` and `turn` frames.
-- Capy commits the `transcript` entry for the user message after the first `tool_call` of the run.
-- `assistant` fragments have 1 to 15 characters. For one `callId`, the committed `transcript` text is equal to the joined
-  fragments.
-- A stream opened with `until=run` closes with `done` after the run ends. It did not close on the extra early `run end`.
-
-### Thread status
-
-- `idle`, then `working`, then `idle`: a normal turn.
-- `waiting`: Astra ran `sleep 90`. Capy put the command in the background, ended the run, and set the thread to `waiting`. When
-  the command finished, the thread continued without a new message. capy-acp keeps the prompt open while the thread is
-  `waiting`, for up to `CAPY_ACP_WAITING_LIMIT_MS` (10 minutes by default). Then it ends the turn with a note that Capy
-  continues in the thread.
-- `failed`: capy-acp ends the turn with a note. The thread keeps its transcript.
-
-### Follow-ups and resume
-
-`POST /threads/{id}/message` returns `{id, deduped}`. A `/stream` request with `Last-Event-ID: <last transcript id>` replays
-no old events. It starts at the new user entry (`s3-followup`). capy-acp sends a new `clientKey` for each prompt, so a retry
-of one prompt does not create a second message.
-
-### Interrupt
-
-`POST /threads/{id}/interrupt` returns `200 {"id": "<26-char id>", "deduped": false}`. The docs do not describe this receipt.
-The recording `anthropic_claude-opus-5-5/s4-interrupt` shows an interrupt during a reply:
-
-1. The fragments stop.
-2. `turn end` arrives with `outcome: "settled"`, not `aborted`.
-3. `run end` arrives.
-4. `status: idle` arrives.
-
-Capy commits no assistant transcript entry, so the partial reply exists only in the live frames. On a `waiting` thread, an
-interrupt cancels the pending wake and sets `idle`. For ACP `session/cancel`, capy-acp sends an interrupt. When the thread
-settles, the prompt ends with `stopReason: "cancelled"`.
-
-## Errors (recorded)
+### Recorded errors
 
 | Case | Status | Body |
 | --- | --- | --- |
 | Unknown model | 400 | `{"_tag":"ModelSelection.Rejected","message":"Unknown model: nope/none","candidates":[]}` |
 | Unknown project | 404 | `{"_tag":"capy/ProjectNotFound","projectId":…}` |
 | Unknown device | 400 | `{"_tag":"capy/InvalidRequest","message":"Device not found"}` |
-| Root that is not linked | 400 | `{"_tag":"capy/InvalidRequest","message":"This device does not link a folder at …"}` |
 | Missing thread | 404 | `{"_tag":"capy/ThreadNotFound","threadId":…}` |
-| Bad resume cursor | 400 | `{"_tag":"capy/InvalidRequest","message":"Invalid event cursor: …"}` |
+| Bad stream cursor | 400 | `{"_tag":"capy/InvalidRequest","message":"Invalid event cursor: …"}` |
 | Bad key | 401 | `{"_tag":"capy/Unauthorized"}` |
 
-No live test caused `429 capy/RateLimited` (with `retryAfterSeconds` and `retry-after`), `503 capy/StreamUnavailable`, or
-`error` frames in the stream. The client follows the docs for these cases. Tests cover them with a fake transport.
+No test caused `429 capy/RateLimited`, `503 capy/StreamUnavailable` or an `error` frame. The client follows the docs for
+these, and the tests cover them with a fake transport.
 
-## Linked and unlinked folders
+### Stream facts
 
-When the client opens a folder (the ACP `cwd`), capy-acp finds the repository and then the workspace.
+- A follow-up with `Last-Event-ID: <last transcript id>` starts at the new user entry and replays nothing (`s3-followup`).
+- An interrupt during a reply (`s4-interrupt`): the fragments stop, then `turn end` (`settled`), `run end`, `status: idle`.
+  Capy commits no assistant entry, so the partial reply exists only in the live frames.
+- A thread whose model put a command in the background (Astra, `sleep 90`) ends the run with `status: waiting`. The docs say
+  that it continues when the command finishes. An interrupt on a waiting thread cancelled the wake: no later entry appeared.
+- The user entry commits after the first model turn ends. When the model starts with a tool, this is after the first
+  `tool_call`.
 
-The repository comes from every git remote of the clone, `origin` first, and from the repository list of a linked folder at
-the git root. A remote counts on any host name, because ssh configs often give github.com another name
-(`git@github-work:acme/app.git`). Only repositories of the user's Capy projects can match, and Capy supports only GitHub.com.
+## How this was tested
 
-Then capy-acp does one of these things:
+- **Recordings:** `fixtures/<model>/<scenario>/` (Opus 5.5, GPT-6.2 Astra, Haiku 5.5), on the desktop app 0.6.0 on Linux x64,
+  2026-11-23. `spike/scrub-fixtures.ts` removed private data.
+- **Live checks:** `capy dock` 0.7.2 on macOS 26 arm64 and Windows Server 2022, 2026-11-24. The desktop app 0.6.0 on Linux
+  and the dock on Windows, 2026-11-25.
+- **Clients:** T3 Code 0.1.12 and an ACP test client.
+- **Current releases:** desktop 0.10.0 (2026-11-24) and `capy dock` 0.9.2. They were not run. A static check of both builds
+  shows that the device files above are unchanged.
+- **Re-check, 2026-11-25:** every claim in this file, against `openapi.json`, the docs pages and read-only API calls.
 
-1. **The folder is linked.** Its git root is a root in `~/.capy/device/workspaces.json`. The desktop app and `capy dock` both
-   keep this file, and capy-acp only reads it. capy-acp uses `{kind: "linked", root}`, so Capy edits the open folder in place,
-   as a local agent does. With `CAPY_ACP_WORKSPACE=worktree`, capy-acp uses a new worktree.
-2. **Another linked folder has the repository, and `CAPY_ACP_ALLOW_WORKTREE_FALLBACK=1` is set.** capy-acp uses a worktree of
-   that folder. The first reply says that the edits go to `~/.capy/worktrees/…`, not to the open folder.
-3. **The local list does not show the folder.** The list can be older than the server state, and a Capy update can move or
-   change the file. So the list is only a hint: capy-acp sends the folder as a linked root, and Capy checks it. capy-acp sends
-   the root in the spelling of the opened folder, because git resolves symlinks (macOS `/tmp` is `/private/tmp`) and Capy keeps
-   the spelling that the user linked. On Windows, it uses backslashes. If Capy answers `400 "This device does not link a folder
-   at …"`, the reply tells how to link the folder. Worktree mode needs a linked folder of the repository, so there capy-acp
-   gives the fix without a request.
-
-capy-acp opens the session in all cases, because T3 Code does not show `session/new` error messages. A setup problem is the
-answer to the first prompt. Each prompt checks the setup again, so a link during a session works without a new session.
-
-Users of an editor expect the agent to edit the folder that they opened. Edits in a hidden worktree look as if the agent did
-nothing. capy-acp cannot link folders, because Capy has no public endpoint for it.
-
-### Device files
-
-capy-acp reads the device id from one of two files, and never writes them:
-
-- The desktop app keeps `device-ids.json` in its data folder. The code of the app (0.6.0) sets that folder for a packaged build:
-  `app.setPath("userData", join(app.getPath("appData"), "Capy"))`. This gives `~/.config/Capy` on Linux,
-  `~/Library/Application Support/Capy` on macOS, and `%APPDATA%\Capy` on Windows. Development builds use other names, for
-  example `Capy Dev`.
-- `capy dock` keeps `~/.capy/dock/status.json`, with a `deviceId` field. `capy dock status` prints the same id.
-
-## Capy API gaps (feedback)
-
-1. **No public endpoint lists devices or links a device folder.** Integrations must read local Capy files to find the device id.
-   The list of linked folders is local too, so a client can only guess which folders Capy accepts. `GET /devices`, `GET /devices/{id}/folders` and an endpoint to link a folder would remove this
-   dependency. The two ways to pair a machine also keep the device id in different files. The desktop app uses
-   `device-ids.json` in its Electron config folder. `capy dock` uses `~/.capy/dock/status.json`.
-2. **A thread does not show where it runs.** `GET /threads/{id}` gives no device, workspace kind or worktree path. capy-acp finds
-   the worktree at `~/.capy/worktrees/<threadId>/<repository name>`, next to a `.capy-managed.json` file. This was seen with the
-   desktop app on Linux and with `capy dock` on macOS and Windows.
-3. **Tool frames from strong models are empty.** An `execute` frame with `text: ""` does not have the one-line summary that
-   `bash` frames have. The `calls` list could give a summary for each inner call.
-4. **Tool frames have no paths, diffs or exit codes.** A `paths: []` field on each write or patch call would let editors show
-   the changed files. capy-acp compares the folder where the thread works (see "File diffs"). This cannot give exit codes or
-   command output, and it cannot tell an edit of the user from an edit of a running call.
-5. **Run and turn frames are not reliable at the start of a stream.** Examples are an extra `aborted` turn, a missing
-   `run start`, and a `run start` after content.
-6. **The docs do not describe the interrupt receipt** (`{id, deduped}`).
-7. **"Device not found" has the tag `capy/InvalidRequest`.** A `capy/DeviceNotFound` or `DeviceOffline` tag would let clients
-   react to it.
-8. **Fragments are small.** Each `assistant` frame has 1 to 15 characters, so a reply needs many frames. If the server joined
-   fragments, slow readers would have less work.
-9. **Capy commits transcript entries in a batch at the end of the turn**, and this includes the user message. Usually the
-   commit comes about 70 ms after `idle`. One follow-up committed its reply 9 s after the text stream finished. A client needs
-   the commit to get the resume cursor (otherwise the next turn replays the reply). So the client must wait, and its spinner
-   continues after the text is complete. When the live fragments of a turn are lost, `idle` arrives before any reply text, and
-   the reply commits after `idle`. Only the `done` frame of an `until=run` stream tells that all entries of the run are
-   committed.
-10. **Thread create accepts no files.** `CreateThreadRequest.message` is a plain string without `files`, so a first message
-    cannot include a screenshot. Files in a second message (`delivery: "steer"`) race the first step of the agent. In a live
-    test, Opus answered "No image came through", then answered again when the files arrived. capy-acp saves the files of a first
-    prompt on the device and gives their paths. The agent reads them with `read`. A `files` field on create would fix this.
-11. **The message list does not tell a client its position.** The last page returns `cursor: null`. After a restart, a client
-    has no event id to resume the stream from, and the ids of tool entries are not event ids. capy-acp saves the stream cursor
-    each time that it moves. A `latestEventId` field on the page, or on `GET /threads/{id}`, would make this unnecessary.
-12. **The message list and the stream encode missing fields differently.** The list sends `clientKey: null`, `callId: null`
-    and others, where the stream leaves the fields out. Also, `calls[].durationMs` can be the string `"Infinity"`. A strict
-    decoder that matches the stream frames rejects complete list pages.
-13. **`GET /models` gives no modalities.** Clients cannot know which models accept images. So capy-acp announces image prompts
-    for all models.
-14. **The stream gives no reasoning, plan or usage.** The docs say so ("never the model's internal reasoning"). ACP
-    `agent_thought_chunk`, `plan` and usage updates have no data. A token count for each turn on `turn end` would be sufficient
-    for usage.
-15. **The error for a root that is not linked does not list the linked folders.** A path that is almost correct, such as a
-    sibling clone or a symlink, is then difficult to find.
-16. **A tool entry has no status.** Capy commits a call that an interrupt stopped like a finished call. The only difference is
-    that the stopped call has no `calls` list. A model that names its tool directly (Haiku's `bash`) never sends `calls`, so for
-    such an entry after a cancel, a client cannot know the outcome.
-
-## File diffs
-
-The Capy stream gives the names of the inner tools of a call (`write`, `edit`, `bash`), but no paths or contents. The thread
-works on this machine: in linked mode in the folder that the client has open, and in worktree mode in its own worktree (gap 2).
-So `src/changes.ts` finds the changes itself, and only reads.
-
-- **Baseline.** When a prompt starts, before capy-acp sends the message, it records `HEAD` and the content of each changed or
-  untracked file. It uses `git status --porcelain=v1 -z --untracked-files=all --no-renames`, without ignored files. Thus
-  capy-acp never shows uncommitted user edits as Capy edits. If Capy later edits such a file, the diff starts from the user
-  version. A new thread's worktree does not exist yet when the prompt starts. Capy makes it clean at the base commit, so when
-  capy-acp first finds it, the baseline is its `HEAD`.
-- **Collection.** capy-acp looks at the folder when a tool call starts while no other call runs, and when a call finishes. It
-  examines files that are changed now, files that it saw before, and files in `HEAD..newHEAD` if Capy committed during the
-  turn. It compares each file by SHA-256 with the last version that it saw, or with the blob at the last `HEAD`.
-- **Old text.** For a clean file, the old text comes from `git cat-file --filters`, which applies the checkout conversions. Git
-  for Windows checks text out with CRLF, and `.gitattributes` can set eol and smudge filters. Git also accepts an LF copy as
-  clean under `core.autocrlf`. If only the line endings of the raw blob agree with the working file, capy-acp uses the raw blob.
-  capy-acp sets `GIT_LFS_SKIP_SMUDGE=1`, so a diff never downloads LFS content.
-- **Update.** capy-acp sends the changes as a `tool_call_update` on that call. The update has the kind `edit` (`delete` if all
-  changes are deletions), a title with the file names, `content: [{type: "diff", path, oldText?, newText}]` and `locations`.
-- **Attribution by time.** A call gets the changes that occurred while it ran. A change found when a call starts, after a
-  read-only call (`read`, `search`, `fetch`, `think`), or after the last call occurred while no Capy call could write. It gets
-  an item of its own with the kind `other` and the title `Edited … outside a Capy tool call`, so that T3 shows the title and
-  not "Changed files". Such changes come from the user, or from a command that Capy left running in the background. An edit
-  of the user while a call that can write runs is credited to that call: capy-acp sees files, not processes.
-- **Last check.** At the end of the turn, a last check finds edits from a call that did not report its end, for example after
-  an interrupt. Each call gets its changes one time, so ACP `content`, which replaces and does not append, never loses a diff.
-- **Limits.** Binary files and files over 256 KiB get a location, but no diff. capy-acp compares files over 16 MiB by size and
-  modification time. Symlinks show as their target path, as git stores them. capy-acp tracks a maximum of 500 files in a turn.
-  If tracking fails (no git repository, a git timeout), capy-acp writes the error to stderr and shows no diffs for that turn.
-  The prompt does not fail.
-- A rename shows as a deletion and an addition. capy-acp does not show changes of the file mode only (`chmod +x`).
-
-## Sessions, media and subagents
-
-- **Sessions.** When a thread exists, capy-acp saves the session to `~/.local/state/capy-acp/sessions/<sessionId>.json` (mode
-  0600, folder mode 0700). The record has the thread id, the stream cursor, the model, the reasoning level, the title and the
-  folder. capy-acp saves the cursor each time that it moves, so a crash during a turn loses nothing. There is one file for each
-  session, because T3 Code runs one adapter process for each thread. Each write goes to its own temporary file, and a rename
-  puts the file in place. Saves of one session run one at a time, because Windows refuses a rename onto a file that another
-  rename replaces. capy-acp uses a session id as a file name only if it has the form `[A-Za-z0-9_-]`.
-- **`session/load`** replays `GET /threads/{id}/messages` as `user_message_chunk`, `agent_message_chunk` and completed
-  `tool_call` updates, with files as links. Then it answers. **`session/resume`** restores the same state without a replay. A
-  session id with no record (a session that sent no prompt) opens empty. A saved session keeps its own folder, also if the
-  client opens it from a different folder, because the thread works where Capy created it.
-- T3 Code 0.1.12 uses `session/load` if `loadSession` is true, and otherwise `session/resume`. Without
-  `promptCapabilities.image`, T3 Code refuses all image attachments ("ACP driver did not negotiate image prompt support").
-- **Prompt media.** ACP `image`, `audio` and binary `resource` blocks become files. The name comes from the URI of the block,
-  or else it is `image-1.png` and similar. capy-acp skips empty blocks. It gives the names of files over the Capy limit of 250
-  MB in the text. Saved names do not keep characters that Windows forbids, because a `:` would write an NTFS alternate data
-  stream. Follow-ups upload files through `POST /files` and presigned PUT requests (without an auth header), and attach
-  `files` to the message. For the first prompt of a new thread, capy-acp saves the files locally (gap 10).
-- **Delivered files** (`attachments` on assistant entries) become `resource_link` chunks. The link is `file://` if
-  `sourcePath` exists on this machine. Otherwise it is the presigned download URL from
-  `GET /threads/{id}/attachments/{fileId}/download`. On Windows, `sourcePath` has the form `C:/Users/…`, with forward slashes.
-- **Subagents.** The `task` frames of the stream (or `subagent` frames with `frames=subagent`) become one tool call for each
-  subagent, with its path as the title. `draft` is pending. `working` and `waiting` are in progress. `done` is completed.
-  `failed` is failed. `idle` means "at rest". A new subagent sends `idle` first, before it starts (seen live). So `idle` is
-  pending until the subagent was seen running, and completed after that. A parent that waits for its subagent ends its run as
-  `waiting`. The later subagent frames and the answer of the parent come in the next run, and capy-acp follows that run in the
-  same prompt. After a run ends, the stream does not replay `task` frames.
-- **Cancel.** After the interrupt, Capy commits the stopped call as a normal tool entry, without a status (gap 16). In every
-  cancelled test turn (Opus 5.5 on Linux, macOS and Windows), the stopped `execute` entry had no `calls` list, and each
-  finished one had it. So capy-acp shows an `execute` entry without `calls` as failed, with the title "Stopped tool call", and
-  all others as completed. For an entry that names its tool directly (Haiku), the outcome after a cancel is unknown, and
-  capy-acp shows it as failed. `session/load` uses the same rule.
-- **Windows shell.** On Windows, Capy uses Git Bash. In one test, Capy wrote a file named `NUL` with a redirect in cmd style.
-  The diffs showed it as an added file.
-
-## Connection failures
-
-- If a stream drops during a turn, capy-acp connects again with `Last-Event-ID` from the last committed entry. The delay starts
-  at 0.5 s and doubles to a maximum of 30 s. After 12 failures in sequence, the turn ends with a note that the connection was
-  lost. Capy keeps the message and continues to work. The next prompt streams from the point where the reply stopped.
-- If a stream closes again and again with no new events while the thread is busy, capy-acp waits before it opens the stream
-  again (up to 4 s). It never opens the stream in a tight loop.
-- If Capy rejects a cursor, capy-acp drops the cursor and reads without it.
-- If a failure occurs before Capy accepted the message, the reply says that nothing was sent. So it is safe to send again.
-
-## T3 Code findings (feedback for T3, not Capy)
-
-- **T3 adds host instructions to prompts.** They describe tools that only T3 has (`delegate_task`, `preview_*`, PR linking),
-  which the Capy agent does not have. `src/prompt.ts` handles the three forms that the tests saw (`test/prompt.test.ts`):
-  1. A message typed in T3: `<t3_code_instructions>…</t3_code_instructions><user_request>…</user_request>`, then
-     `<runtime_info>` and `<pull_request_linking>` blocks.
-  2. A message from another agent to a running session: `[T3 Code: the agent in T3 thread "…" sent this message, not the
-     user.]`, an empty line, and the request. On the first prompt of a session, the same blocks follow, without a
-     `<user_request>` wrapper.
-  3. An agent that starts a thread: form 1, with the attribution line in `<user_request>`.
-
-  capy-acp sends only the request. `CAPY_ACP_FORWARD_HOST_INSTRUCTIONS=1` sends all of the text.
-- **`session/new` errors lose their message.** T3 shows only "Provider session failed to open". So capy-acp opens the session,
-  and answers the first prompt with the setup problem and its fix.
-- T3 shows ACP kinds strictly. `execute` becomes "Ran command", with `rawInput.command` or a title in backticks as the command
-  line. `edit`, `delete` and `move` become "Changed files", with a patch from the `diff` content. All other kinds become one
-  line with the title. Capy gives no command text. So capy-acp never sends `execute` (this prevents an empty `$ ` or an invented
-  command), and it sends `edit` only with real diffs. Changes outside a Capy tool call get the kind `other`, so T3 shows their
-  title, which says where they came from.
-- The T3 checkpoint at the end of a turn was `[]` on the first run of a thread, and listed the files on the second run. The
-  diffs from capy-acp were correct on both runs.
-- The model picker shows `default` until a session reports `configOptions`. capy-acp sends the Capy model list with each
-  `session/new`.
-
-## End-to-end checks
-
-On Linux, 2026-11-23:
-
-| Check | Result |
-| --- | --- |
-| ACP test client (`spike/acp-client.ts`), Opus 5.5: prompt with tool use, then a follow-up | The reply streamed. The `tool_call` went from in progress to completed ("bash (2.5 s)"). The follow-up used the same thread. Both prompts ended with `end_turn` |
-| Same client, GPT-6.2 Astra, `session/cancel` after 15 s | capy-acp sent a Capy interrupt. `stopReason: cancelled` came about 2 s later |
-| Test client, Opus 5.5, linked folder | Capy wrote a file in the open folder. The follow-up ended with `end_turn`, without a replay. No commit |
-| Test client: folder not linked at session start, linked between prompts, then an edit of two files, then a delete | Prompt 1 got the fix as its answer. Prompt 2 found the setup on the retry, and showed an `edit` item "Edited README.md and docs/USAGE.md" with both diffs. Prompt 3: an `rm` in bash showed as the kind `delete` |
-| T3 Code thread, linked sandbox, Opus 5.5 | Turn 1: `bash (2.6 s)`, then **Changed files** with unified diffs. Turn 2 (`git mv` rename): README modified, greet.sh added, hello.sh deleted |
-| T3 interrupt during a `sleep` loop | The tool item showed `interrupted` 4 s after the request, and the run showed `interrupted` 2 s later. The Capy thread was idle |
-| Test client: an image on the first prompt and another image on the follow-up | Prompt 1: `read (749 ms)` of the saved copy, "It's a blue square on a white background." Prompt 2 (upload through the API): "Red, yellow, purple." |
-| Test client: a new process resumes the session, and another process loads it | Resume: no replay, and the follow-up continued the same thread. Load: a replay of both prompts, the read tool, the uploaded image (as a link) and all replies, then two follow-ups on the same thread |
-| T3 thread with an image, adapter process stopped, then a follow-up | T3 started a new adapter process and restored the session. The follow-up answered on the same Capy thread, with no duplicate items |
-
-On macOS 26 arm64 and Windows Server 2022 x64 with `capy dock` 0.7.2 and an ACP test client, 2026-11-24:
-
-| Check | macOS | Windows |
-| --- | --- | --- |
-| Prompt with a tool, then a follow-up | `Darwin arm64`, same thread | `win32x64`, same thread |
-| Cancel during a long command | `cancelled`, stopped call shown as failed | `cancelled`, stopped call shown as failed |
-| A proxy cut the stream during a tool call | Connected again, tool completed one time, reply shown one time | Same as macOS |
-| Capy delivered a file | `file:///tmp/…/hello.txt` | `file:///C:/Users/…/hello.txt` |
-| One subagent on the same machine | Pending, in progress, completed | Same as macOS |
-| Edit in linked mode | Not run | Diffs with Windows paths, CRLF line endings kept |
-
-On Linux x64 with the desktop app 0.6.0 and an ACP test client, and on Windows with `capy dock` 0.7.2, 2026-11-25:
-
-| Check | Result |
-| --- | --- |
-| Opus 5.5: `echo first`, then a long loop, cancel during the loop | The first call stayed `completed`, and the stopped call became `failed`. A second run, in which Opus ran both commands in one call, showed that call as `failed`, "Stopped tool call" |
-| The harness edited README.md 1 s after the prompt, before the first Capy call | An item "Edited README.md outside a Capy tool call" came before the first call, which showed no diff |
-| Worktree mode: a new file and an edit | "Edited README.md and notes/WORKTREE.md" with paths in `~/.capy/worktrees/<thread>/capy-acp-sandbox`. The open folder did not change |
-| Worktree mode on Windows | "Created notes/WORKTREE.md" with a path in `C:\Users\…\.capy\worktrees\<thread>\capy-acp-sandbox` |
-| Capy delivered a file (desktop app) | `file:///tmp/capy-acp-deliver/hello.txt`, `text/plain`, 20 B |
-| One subagent on the same machine (desktop app) | Pending, in progress, completed. The answer, 187 bytes, matched `wc -c` |
-| Haiku 5.5: the same cancel check | Capy put the loop in the background, so both calls finished before the cancel. Haiku entries have no `calls` list (gap 16) |
-
-The unit tests pass on Linux, macOS 26 and Windows Server 2022.
-
-These live checks found bugs. Each fix has a regression test:
-
-- **The follow-up replayed the previous reply.** Capy commits the final assistant entry after `status: idle`. The turn ended on
-  `idle`, so the resume cursor was one entry short. Now the turn ends when all streamed replies are committed, or when the
-  stream closes and `GET /threads/{id}` shows idle (for an interrupted reply that Capy never commits).
-- **A reply without streamed fragments was lost.** After a `session/load`, the reply committed after `idle`, and the turn had
-  already ended on `idle`. Now capy-acp reads an `until=run` connection until the server closes it (`done` follows the last
-  entries). A grace time of 10 s, checked on each frame, limits the wait (heartbeats come every 15 s).
-- **`session/load` failed on `null` fields in the message list** (gap 12). Now capy-acp decodes transcript entries one field at
-  a time. Only `id` and `source` are strict, and capy-acp skips an entry that it cannot read, so the page does not fail.
-- **The first turn after a load showed a reply again that the load had replayed.** Now the load moves the saved cursor to the
-  newest replayed user or assistant entry, because the id of that entry is its event id.
-- **capy-acp found no device on a machine paired with `capy dock`.** It now reads `~/.capy/dock/status.json` when the desktop
-  app file is missing.
-- **A new subagent showed as completed first**, and **a cancelled call showed as completed**. See "Subagents" and "Cancel".
-- **Windows:** parallel session saves failed with `EPERM`, delivered files got the download URL instead of the local path, and
-  diffs marked all lines as changed because of CRLF line endings.
-- **macOS:** git resolves symlinks in the root that it prints, so a folder outside the local list went to Capy as
-  `/private/tmp/…`. Now capy-acp sends the spelling of the opened folder (found by the unit tests on macOS).
+How the adapter works around each gap (diffs, sessions, reconnects, cancel) is in [design.md](design.md). The test
+suite replays the recordings through a fake Capy client. If a change ships behind a flag, I can run it against the
+recordings and the three test machines within a day.

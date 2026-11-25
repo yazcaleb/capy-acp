@@ -1,8 +1,8 @@
 /**
  * Observes what a Capy thread changes on disk, so ACP clients can show real diffs.
  *
- * Capy's stream names the tools a call ran but never the files or their contents (docs/capy-api-notes.md, API
- * gap 4). The thread works on this machine, in the folder the client has open (linked mode) or in its
+ * Capy's stream names the tools a call ran but never the files or their contents (docs/capy-api-notes.md, ask
+ * 3). The thread works on this machine, in the folder the client has open (linked mode) or in its
  * own git worktree, so the adapter can see the changes itself: it records the working tree when a turn
  * starts, then diffs it as tool calls start and finish. Strictly read only: `git status`, `git rev-parse`,
  * `git diff --name-only`, `git cat-file`, directory listings and plain file reads. Git LFS smudging is
@@ -227,11 +227,13 @@ const trackFolder = (root: string, onError: (message: string) => void): ChangeTr
 }
 
 /**
- * Tracks the git worktree that Capy makes for a thread in worktree mode: `<capyHome>/worktrees/<threadId>/<folder>`,
+ * Tracks the git worktree that Capy makes for a thread in worktree mode: `<worktree folder>/<threadId>/<folder>`,
  * where the folder is the repository name (seen with the desktop app and `capy dock`). The API does not say
- * where a thread works (API gap 2), so the worktree is found by that path once the thread exists. Capy makes
- * it clean at the base commit for the thread's first message, so a worktree found during a turn starts from
- * its HEAD. If the folder is not there, the turn shows no diffs, as before.
+ * where a thread works (docs/capy-api-notes.md, ask 4). Since Capy 0.9.2 a user can choose the worktree
+ * folder, so the thread's folder comes from the worktree list in `device/workspaces.json` (`createdJamId`),
+ * and else from the default `<capyHome>/worktrees/<threadId>`. Capy makes the worktree clean at the base commit
+ * for the thread's first message, so a worktree found during a turn starts from its HEAD. If the folder is not
+ * there, the turn shows no diffs.
  */
 export const makeWorktreeTracker = (
   capyHome: string,
@@ -244,7 +246,12 @@ export const makeWorktreeTracker = (
   const find = Effect.promise(async () => {
     const id = threadId()
     if (id === undefined) return undefined
-    const dir = join(capyHome, "worktrees", id)
+    const listed = await readFile(join(capyHome, "device", "workspaces.json"), "utf8").then(
+      (text) => (JSON.parse(text) as { worktrees?: ReadonlyArray<{ root?: unknown; createdJamId?: unknown }> }).worktrees,
+      () => undefined
+    )
+    const entry = listed?.find((w) => w.createdJamId === id && typeof w.root === "string")
+    const dir = typeof entry?.root === "string" ? entry.root : join(capyHome, "worktrees", id)
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
     const names = entries.filter((entry) => entry.isDirectory() && !entry.name.startsWith(".")).map((entry) => entry.name)
     const name = repo.split("/").at(-1)?.toLowerCase()

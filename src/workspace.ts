@@ -116,7 +116,7 @@ export const resolveWorkspace = (input: {
           value: {
             ...base,
             workspace: { kind: "worktree" },
-            note: "Capy is working in its own git worktree under ~/.capy/worktrees, not in this folder (CAPY_ACP_WORKSPACE=worktree)."
+            note: "Capy is working in its own git worktree (in Capy's worktree folder, ~/.capy/worktrees by default), not in this folder (CAPY_ACP_WORKSPACE=worktree)."
           }
         }
   }
@@ -128,7 +128,7 @@ export const resolveWorkspace = (input: {
         workspace: { kind: "worktree" },
         note:
           `${input.gitRoot} is not linked to this Capy device, so Capy is working in a new worktree of ${sameRepo.root} ` +
-          "under ~/.capy/worktrees. Its edits will not appear in this folder."
+          "in Capy's worktree folder (~/.capy/worktrees by default). Its edits will not appear in this folder."
       }
     }
   }
