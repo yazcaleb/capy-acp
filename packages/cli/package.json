@@ -1,0 +1,41 @@
+{
+  "name": "capy-cli",
+  "version": "0.1.0",
+  "description": "Start, follow, message and stop Capy coding-agent threads from a terminal, a script or CI. A community project, not affiliated with Capy.",
+  "keywords": [
+    "cli",
+    "capy",
+    "coding-agent",
+    "ci",
+    "terminal"
+  ],
+  "homepage": "https://github.com/yazcaleb/capy-acp/tree/main/packages/cli#readme",
+  "bugs": "https://github.com/yazcaleb/capy-acp/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yazcaleb/capy-acp.git",
+    "directory": "packages/cli"
+  },
+  "license": "MIT",
+  "author": "Yaz Caleb",
+  "type": "module",
+  "bin": {
+    "capy-cli": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build.mjs cli",
+    "prepack": "node ../../scripts/build.mjs cli",
+    "prepublishOnly": "pnpm --dir ../.. typecheck && pnpm --dir ../.. test"
+  },
+  "dependencies": {
+    "effect": "4.1.5"
+  }
+}

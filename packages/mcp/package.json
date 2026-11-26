@@ -1,0 +1,44 @@
+{
+  "name": "capy-mcp-server",
+  "version": "0.1.0",
+  "description": "An MCP server that lets coding agents such as Claude Code, Codex and Cursor start Capy coding-agent threads, wait for them and read their results. A community project, not affiliated with Capy.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "capy",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "cursor"
+  ],
+  "homepage": "https://github.com/yazcaleb/capy-acp/tree/main/packages/mcp#readme",
+  "bugs": "https://github.com/yazcaleb/capy-acp/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yazcaleb/capy-acp.git",
+    "directory": "packages/mcp"
+  },
+  "license": "MIT",
+  "author": "Yaz Caleb",
+  "type": "module",
+  "bin": {
+    "capy-mcp": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node ../../scripts/build.mjs mcp",
+    "prepack": "node ../../scripts/build.mjs mcp",
+    "prepublishOnly": "pnpm --dir ../.. typecheck && pnpm --dir ../.. test"
+  },
+  "dependencies": {
+    "effect": "4.1.5"
+  }
+}

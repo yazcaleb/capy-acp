@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+
+# esbuild's install script checks its platform binary.
+allowBuilds:
+  esbuild: true

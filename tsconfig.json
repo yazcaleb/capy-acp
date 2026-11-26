@@ -3,6 +3,7 @@
     "target": "es2024",
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "customConditions": ["source"],
     "lib": ["es2024"],
     "types": ["node"],
     "strict": true,
@@ -14,5 +15,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "test", "vitest.config.ts"]
+  "include": ["packages/*/src", "packages/*/test", "vitest.config.ts"]
 }

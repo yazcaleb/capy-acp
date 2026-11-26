@@ -3,3 +3,5 @@ dist/
 .env
 *.local
 spike/raw/
+# Copied from the root LICENSE by scripts/build.mjs.
+packages/*/LICENSE

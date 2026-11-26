@@ -33,7 +33,7 @@ How capy-acp turns a Capy thread into an ACP session, and the workarounds for wh
 
 The Capy stream gives the names of the inner tools of a call (`write`, `edit`, `bash`), but no paths or contents. The thread
 works on this machine: in linked mode in the folder that the client has open, and in worktree mode in its own worktree (the Capy API does not say where a thread works).
-So `src/changes.ts` finds the changes itself, and only reads.
+So `packages/acp/src/changes.ts` finds the changes itself, and only reads.
 
 - **Baseline.** When a prompt starts, before capy-acp sends the message, it records `HEAD` and the content of each changed or
   untracked file. It uses `git status --porcelain=v1 -z --untracked-files=all --no-renames`, without ignored files. Thus
@@ -111,7 +111,7 @@ So `src/changes.ts` finds the changes itself, and only reads.
 ## T3 Code findings (feedback for T3, not Capy)
 
 - **T3 adds host instructions to prompts.** They describe tools that only T3 has (`delegate_task`, `preview_*`, PR linking),
-  which the Capy agent does not have. `src/prompt.ts` handles the three forms that the tests saw (`test/prompt.test.ts`):
+  which the Capy agent does not have. `packages/acp/src/prompt.ts` handles the three forms that the tests saw (`packages/acp/test/prompt.test.ts`):
   1. A message typed in T3: `<t3_code_instructions>…</t3_code_instructions><user_request>…</user_request>`, then
      `<runtime_info>` and `<pull_request_linking>` blocks.
   2. A message from another agent to a running session: `[T3 Code: the agent in T3 thread "…" sent this message, not the

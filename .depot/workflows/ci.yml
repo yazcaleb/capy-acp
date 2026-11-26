@@ -26,4 +26,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      - run: node dist/bin.js --version
+      - run: node packages/acp/dist/bin.js --version
+      - run: node packages/mcp/dist/bin.js --version
+      - run: node packages/cli/dist/bin.js --version

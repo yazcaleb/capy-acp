@@ -1,0 +1,17 @@
+{
+  "name": "@capy-acp/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Code that capy-acp, capy-mcp-server and capy-cli share. Never published: each of them bundles it at build time.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*.js": {
+      "source": "./src/*.ts"
+    }
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.9.1",
+    "effect": "4.1.5"
+  }
+}

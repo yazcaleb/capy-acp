@@ -1,14 +1,15 @@
 # Capy API notes
 
-Feedback on the Capy public API from building [capy-acp](../README.md), which runs Capy device threads from any Agent Client
-Protocol (ACP) client. The goal is one client integration that puts Capy in T3 Code, Zed, JetBrains IDEs, Neovim, Emacs and
-the other ACP editors, so their users can pick Capy from the agent menu they already use. The threads run on the user's own
-computer, as Capy device threads.
+Feedback on the Capy public API from building three clients on it: [capy-acp](../packages/acp#readme), which runs Capy
+threads from any Agent Client Protocol (ACP) editor (T3 Code, Zed, JetBrains IDEs, Neovim, Emacs);
+[capy-mcp-server](../packages/mcp#readme), which lets other agents (Claude Code, Codex, Cursor, Grok, Conductor's agents) hand
+work to Capy threads; and [capy-cli](../packages/cli#readme), for terminals and CI. The threads run on the user's own
+computer as Capy device threads, or on Capy cloud machines when the user asks for one.
 
-capy-acp is a community project. Capy did not make it.
+These are community projects. Capy did not make them.
 
 **The short version.** The API was enough to build a working adapter: streaming, resume, cancel, files, subagents and
-diffs work on Linux, macOS and Windows. Seven additive changes would remove almost all of its workarounds. Asks 1, 2 and 6 only
+diffs work on Linux, macOS and Windows. Eight additive changes would remove almost all of the workarounds. Asks 1, 2 and 6 only
 expose data that Capy already has. (The published response schemas set `additionalProperties: false`, so the spec would
 need to allow the new fields for clients that decode strictly.) The first one matters most:
 a public, read-only way to find the device on this machine and the folders it links. Today every integrator has to read
@@ -38,6 +39,10 @@ Each claim below cites a recording in `fixtures/`, a live API response, or a doc
 - **Errors.** Errors before the stream are tagged JSON (`capy/ThreadNotFound`, `ModelSelection.Rejected`, ...), so a client
   can turn them into a fix for the user.
 - **`until=run` with `done`.** This is the one reliable way to know that a run's entries are committed.
+- **Device threads from anywhere.** `device: {deviceId, workspace: {kind: "worktree", repos: ["owner/name"],
+  startFromOrigin: true}}` needs no local path, so an agent on a computer without Capy (Grok Bot's cloud computer, a CI
+  job) can start a thread on the user's own device. The device made the worktree from GitHub, and the thread cost 0
+  credits. Live, 2026-11-26, from a process with an empty home folder and `CAPY_DEVICE_ID`.
 - **Docs for machines.** Each docs page has a `.md` twin, and `llms-full.txt` and `openapi.json` exist. The checks in this
   file used them.
 
@@ -57,6 +62,8 @@ Each ask has its own section below, with the evidence, the cost today and a prop
 6. **[Input types and prices on `GET /models`](#6-input-types-and-prices-on-get-models).** A model picker cannot tell which
    models accept images, or which are free.
 7. **[Token usage on `turn end`](#7-token-usage-on-turn-end).** Editors cannot show a context meter.
+8. **[Pair a headless machine with a key](#8-pair-a-headless-machine-with-a-key).** Today every new device needs a person
+   at a terminal, so CI runners, short-lived VMs and agent sandboxes cannot become devices.
 
 ### 1. Find the device and its linked folders
 
@@ -77,8 +84,8 @@ Only the device can link a folder: the desktop app (`capy://app/settings/project
 `capy dock dirs add`, which works only while the dock is stopped. Stopping the dock stops the threads that run on it, so
 the fix for an unlinked folder interrupts other work on a dock machine.
 
-**Cost.** `readDevice` and `readLinkedFolders` in `src/workspace.ts`, a `CAPY_DEVICE_ID` setting for users in more than
-one organization, and a regex on an error message (`isNotLinked` in `src/agent.ts`). A Capy release that moves one of these files
+**Cost.** `readDevice` and `readLinkedFolders` in `packages/core/src/workspace.ts`, a `CAPY_DEVICE_ID` setting for users in more than
+one organization, and a regex on an error message (`isNotLinked` in `packages/acp/src/agent.ts`). A Capy release that moves one of these files
 would break every integration that does this.
 
 **Proposal.** Linking a local path from a cloud API is a security decision, so linking should stay on the machine (app or
@@ -119,7 +126,7 @@ follow-up). The four streams opened right after a thread was created on a Claude
 `turn end` (`aborted`) pair and a `run end`, all before `run start`. A client cannot use these frames to mark a turn. This may be a replay of the previous run's
 end, which would be fine if the docs said so.
 
-**Cost.** A 10 s grace timer after `idle` (`END_GRACE_MS` in `src/turn.ts`), a `GET /threads/{id}` check when the stream
+**Cost.** A 10 s grace timer after `idle` (`END_GRACE_MS` in `packages/acp/src/turn.ts`), a `GET /threads/{id}` check when the stream
 closes, a cursor write after every transcript entry, and a load that moves the cursor to the newest replayed entry.
 
 **Proposal.**
@@ -142,7 +149,7 @@ never have `calls`, so after a cancel their outcome is unknown.
 **What the user sees.** A tool item titled "write, bash (1.6 s)". Without the adapter's own diffs, the changed files would
 not show at all.
 
-**Cost.** `src/changes.ts` records a git baseline before each prompt and compares the folder at each tool call boundary. It
+**Cost.** `packages/acp/src/changes.ts` records a git baseline before each prompt and compares the folder at each tool call boundary. It
 handles CRLF, smudge filters and LFS, and still cannot tell a user's edit from Capy's while a writing call runs. This is the
 one problem in the adapter that it cannot fix by itself. Telling the writers apart needs the process that wrote each file,
 which only system-level tracing gives (root on Linux, an Apple entitlement on macOS, admin on Windows). The device's own
@@ -177,6 +184,9 @@ worktree in the private worktree list in `~/.capy/device/workspaces.json` (by `c
   the dock still say `~/.capy/worktrees`.
 - A thread can move to the cloud (since 0.4.2) and, since 0.9.0, to another device ("Continue on"). The API does not report the move, so a
   client can keep watching a folder that the thread left.
+- capy-mcp-server's `get_thread` and `capy-cli status` know where a thread runs only if they started it in the same
+  process. For any other thread they cannot tell an agent whether its edits are on this computer, on another device or in
+  the cloud.
 
 **Proposal.**
 
@@ -206,7 +216,7 @@ from disk. This works only for device threads.
 **Today.** A model has `id`, `name`, `billing`, `route`, `reasoningModes`, `fast`, `pro` and `ultrafast`. It has no price, no
 input types and no context window. The prices exist on the docs page "Models & pricing".
 
-**Cost.** capy-acp downloads `docs.capy.ai/models-and-pricing.md` and parses its table (`src/pricing.ts`), so the picker can
+**Cost.** capy-acp downloads `docs.capy.ai/models-and-pricing.md` and parses its table (`packages/core/src/pricing.ts`), so the picker can
 say "Particle-1 · free" or "Inkling 2 Small · $0.30/$1.00 per 1M". If the table changes, the label falls back to
 "Capy credits". capy-acp offers image prompts for every model, because it cannot tell which accept them.
 
@@ -237,6 +247,29 @@ tokens: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }   (as /
         + contextTokens, contextWindow
 ```
 
+### 8. Pair a headless machine with a key
+
+**Today.** The first `capy dock` run needs an interactive terminal. It shows a link, a QR code and a pairing code, and a
+person approves the code on capy.ai ("This code is on a machine I am setting up right now"). The docs say: "Never approve
+a code someone sent you." That design is right for a person at a laptop: it keeps a phished code from pairing an
+attacker's machine. But it means no machine can become a device without a person present: a CI runner, a VM made from an
+image, or the cloud computer of a hosted agent. `capy-acp --setup` (and `capy-mcp-server --setup`, `capy-cli setup`)
+installs the dock with Capy's own installer, starts the pairing in the person's terminal, links the folder and installs a
+user service. It cannot do the approval, and it should not try.
+
+**Proposal.** Pairing keys, as GitHub Actions runner registration tokens and Tailscale auth keys work:
+
+```text
+POST /devices/pairing-keys   { organizationId, name?, reusable: false, expiresIn: "1h", tags?: [...] }
+                             -> { key, expiresAt }          (admin, or a service user with the right role)
+capy dock --pair-key <key>   pairs without a prompt, as the user who made the key or a named service user
+GET  /devices                -> [{ id, name, os, online, pairedBy, tags }]   (see ask 1)
+```
+
+The person's approval moves to the moment an admin makes the key, so a phished code no longer works: an attacker cannot
+send a key, only ask for one. A key can be single-use, short-lived, limited to one organization and revoked. With `GET
+/devices`, a client can also let the person pick a device instead of copying an id.
+
 ## Small fixes
 
 - **`null` where the schema says optional.** The message list sends `clientKey`, `editOf`, `sender`, `modelDefault`,
@@ -264,7 +297,8 @@ tokens: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }   (as /
   happened.
 - There is no per-tool approval, so ACP permission requests have nothing to map to. capy-acp never asks the client for
   permission, and its README says so.
-- The free-with-ads models are only for the app. They are not in the API's model list.
+- The free-with-ads models are meant for the app (docs: "The free versions run only in threads that you message from the
+  Capy web or desktop app, because the ad shows there"). But see question 5.
 - Live fragments are small (1 to 38 characters, median 3 for Astra and 13 for Opus). The `dropped` turn outcome covers slow
   readers.
 
@@ -277,6 +311,10 @@ tokens: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }   (as /
    do the same, or does it still need a linked folder of the repository?
 4. `SendMessageRequest.delivery` defaults to `interrupt`. Which delivery should a client use for a follow-up while the thread
    is still `waiting` on a background command, so that the command is not cancelled? `queue`?
+
+5. `particle/particle-1` (route `capy`, free in the price table) is in `GET /models`. An API thread on it, on a small cloud
+   machine, ran on 2026-11-26 and reported 0 credits (`usage.totalCredits = 0`, `vmCredits = 0`). Is Particle-1 free for API
+   threads, and is the machine time of a short cloud run billed later or not at all?
 
 ## Reference
 
@@ -338,6 +376,9 @@ these, and the tests cover them with a fake transport.
 - **Current releases:** desktop 0.10.0 (2026-11-24) and `capy dock` 0.9.2. They were not run. A static check of both builds
   shows that the device files above are unchanged.
 - **Re-check, 2026-11-25:** every claim in this file, against `openapi.json`, the docs pages and read-only API calls.
+- **MCP server and CLI, 2026-11-26:** Claude Code 2.1.330 calling capy-mcp-server's tools; the MCP server in an empty home
+  folder with `CAPY_DEVICE_ID` (a remote device worktree); capy-cli in worktree mode; and one cloud thread on Particle-1 on
+  a small machine. The desktop app 0.6.0 on Linux was the device.
 
 How the adapter works around each gap (diffs, sessions, reconnects, cancel) is in [design.md](design.md). The test
 suite replays the recordings through a fake Capy client. If a change ships behind a flag, I can run it against the
