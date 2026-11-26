@@ -39,6 +39,7 @@ const fake = (f: Fake) =>
       sendMessage: (_, body) => Effect.sync(() => (f.calls.push("send"), f.sends.push(body), { id: "msg" })),
       interrupt: () => Effect.sync(() => void f.calls.push("interrupt")),
       getThread: () => f.getThread?.() ?? Effect.succeed({ id: "jam_test", status: f.status?.() ?? "idle" }),
+      listThreads: () => Effect.succeed([]),
       uploadFiles: (files) => f.uploadFiles ?? Effect.succeed(files.map((file, i) => ({ fileId: `file_${i}`, name: file.name }))),
       listMessages: () => Effect.succeed([]),
       attachmentUrl: () => Effect.succeed("https://files.example/x"),
@@ -208,5 +209,13 @@ describe("runTurn edge cases", () => {
       const { result, updates } = yield* drive(f)
       expect(result.stopReason).toBe("end_turn")
       expect(texts(updates)).toContain("Capy has not started on this message yet")
+    }))
+
+  it.effect("blames a starting cloud machine, not this computer, when a cloud thread never starts", () =>
+    Effect.gen(function*() {
+      const f = newFake([])
+      const { updates } = yield* drive(f, { target: { projectId: "project_TEST", workspace: { kind: "cloud" } } })
+      expect(texts(updates)).toContain("Its cloud machine may still be starting.")
+      expect(texts(updates)).not.toContain("capy dock")
     }))
 })

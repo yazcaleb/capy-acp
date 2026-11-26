@@ -54,19 +54,24 @@ export type DeviceWorkspace =
   | { readonly kind: "linked"; readonly root: string }
   | { readonly kind: "worktree" }
 
-export interface ResolvedWorkspace {
+/** A Capy cloud machine: no device, and nothing on this computer. */
+export interface CloudWorkspace {
+  readonly kind: "cloud"
+}
+
+export interface ResolvedWorkspace<W extends DeviceWorkspace | CloudWorkspace = DeviceWorkspace> {
   readonly projectId: string
   readonly projectName: string
   readonly repo: string
-  readonly workspace: DeviceWorkspace
+  readonly workspace: W
   /** Shown to the user once, in the first reply, when the thread will not edit the open folder. */
   readonly note: string | undefined
   /** What to show if Capy refuses the linked root: how to link the folder. */
   readonly notLinked: Problem
 }
 
-export type Resolution =
-  | { readonly _tag: "Resolved"; readonly value: ResolvedWorkspace }
+export type Resolution<W extends DeviceWorkspace | CloudWorkspace = DeviceWorkspace> =
+  | { readonly _tag: "Resolved"; readonly value: ResolvedWorkspace<W> }
   | { readonly _tag: "Unresolved"; readonly problem: Problem }
 
 /**
@@ -91,7 +96,7 @@ export const resolveWorkspace = (input: {
   readonly repos: ReadonlyArray<string>
   readonly linked: ReadonlyArray<LinkedFolder>
   readonly projects: ReadonlyArray<ProjectSummary>
-  readonly mode: AdapterConfig["workspaceMode"]
+  readonly mode: Exclude<AdapterConfig["workspaceMode"], "cloud">
   readonly allowWorktreeFallback: boolean
   /** How this computer is paired, for the steps that link a folder. */
   readonly device?: DeviceKind | undefined
@@ -153,6 +158,30 @@ export const resolveWorkspace = (input: {
   const opened = input.openedRoot ?? gitRoot
   const root = (input.platform ?? process.platform) === "win32" ? win32.normalize(opened) : opened
   return { _tag: "Resolved", value: { ...base, workspace: { kind: "linked", root }, note: undefined } }
+}
+
+/**
+ * The project and repository of the folder's GitHub remote, for a thread on a Capy cloud machine. Linked
+ * folders and devices play no part: the machine clones the repository from GitHub.
+ */
+export const resolveCloud = (input: {
+  readonly cwd: string
+  readonly gitRoot: string | undefined
+  readonly repos: ReadonlyArray<string>
+  readonly projects: ReadonlyArray<ProjectSummary>
+}): Resolution<CloudWorkspace> => {
+  const resolution = resolveWorkspace({ ...input, linked: [], mode: "linked", allowWorktreeFallback: false })
+  if (resolution._tag === "Unresolved") return resolution
+  return {
+    _tag: "Resolved",
+    value: {
+      ...resolution.value,
+      workspace: { kind: "cloud" },
+      note:
+        `Capy works on ${resolution.value.repo} on a Capy cloud machine (CAPY_ACP_WORKSPACE=cloud), not in this folder, so its edits ` +
+        "do not show here as diffs. Ask Capy to push a branch or open a pull request to get them. Machine time costs Capy credits."
+    }
+  }
 }
 
 const readJson = async (path: string): Promise<unknown> => JSON.parse(await readFile(path, "utf8"))

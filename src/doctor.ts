@@ -7,7 +7,7 @@ import type { AdapterConfig } from "./config.js"
 import { noApiKey, type Problem, problemOf, rejectedApiKey, toText, unreachable } from "./problems.js"
 import { savedApiKey } from "./setup.js"
 import { AGENT_VERSION } from "./version.js"
-import { type Device, type ProjectSummary, readDevice, readGit, readLinkedFolders, resolveWorkspace, samePath } from "./workspace.js"
+import { type Device, type ProjectSummary, readDevice, readGit, readLinkedFolders, resolveCloud, resolveWorkspace, samePath } from "./workspace.js"
 
 export interface DoctorIo {
   readonly write: (text: string) => void
@@ -76,41 +76,57 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
     }
   }
 
-  const device: Device | undefined = await readDevice(config).then(
-    (found) => {
-      const runner = found.kind === "dock" ? "`capy dock`" : found.kind === "desktop" ? "the Capy desktop app" : "the Capy desktop app or `capy dock`"
-      ok(`Capy device ${found.id}. Keep ${runner} running while you work.`)
-      return found
-    },
-    (error: unknown) => {
-      fail(problemOf(error) ?? { title: "Check the Capy device", detail: message(error), steps: [] })
-      return undefined
-    }
-  )
-
-  const [git, linked] = await Promise.all([readGit(folder), readLinkedFolders(config)])
-  if (projects === undefined) {
-    note("The folder check needs an API key that Capy accepts.")
-  } else {
-    const resolution = resolveWorkspace({
-      cwd: folder,
-      ...git,
-      linked,
-      projects,
-      mode: config.workspaceMode,
-      allowWorktreeFallback: config.allowWorktreeFallback,
-      device: device?.kind
-    })
-    if (resolution._tag === "Unresolved") {
-      fail(resolution.problem)
+  const mode = config.workspaceMode
+  if (mode === "cloud") {
+    note(
+      "CAPY_ACP_WORKSPACE=cloud: threads run on Capy cloud machines, so this skips the device and linked folder checks. " +
+        "Machine time costs Capy credits."
+    )
+    const git = await readGit(folder)
+    if (projects === undefined) {
+      note("The folder check needs an API key that Capy accepts.")
     } else {
-      const { repo, projectName, workspace, notLinked } = resolution.value
-      ok(`${git.gitRoot}: ${repo}, in the Capy project "${projectName}".`)
-      const gitRoot = git.gitRoot ?? folder
-      const listed = linked.some((f) => samePath(f.realRoot ?? f.root, gitRoot) || samePath(f.root, gitRoot))
-      if (workspace.kind === "worktree") ok(resolution.value.note ?? "Capy works in a new worktree for each session.")
-      else if (listed) ok("The folder is linked to this device. Capy edits it in place.")
-      else note(`The local list of linked folders does not show this folder. Capy checks it when the first thread starts. If Capy refuses it:\n        ${toText(notLinked, "        ")}`)
+      const resolution = resolveCloud({ cwd: folder, ...git, projects })
+      if (resolution._tag === "Unresolved") fail(resolution.problem)
+      else ok(`${git.gitRoot}: ${resolution.value.repo}, in the Capy project "${resolution.value.projectName}". A cloud machine clones it from GitHub.`)
+    }
+  } else {
+    const device: Device | undefined = await readDevice(config).then(
+      (found) => {
+        const runner = found.kind === "dock" ? "`capy dock`" : found.kind === "desktop" ? "the Capy desktop app" : "the Capy desktop app or `capy dock`"
+        ok(`Capy device ${found.id}. Keep ${runner} running while you work.`)
+        return found
+      },
+      (error: unknown) => {
+        fail(problemOf(error) ?? { title: "Check the Capy device", detail: message(error), steps: [] })
+        return undefined
+      }
+    )
+
+    const [git, linked] = await Promise.all([readGit(folder), readLinkedFolders(config)])
+    if (projects === undefined) {
+      note("The folder check needs an API key that Capy accepts.")
+    } else {
+      const resolution = resolveWorkspace({
+        cwd: folder,
+        ...git,
+        linked,
+        projects,
+        mode,
+        allowWorktreeFallback: config.allowWorktreeFallback,
+        device: device?.kind
+      })
+      if (resolution._tag === "Unresolved") {
+        fail(resolution.problem)
+      } else {
+        const { repo, projectName, workspace, notLinked } = resolution.value
+        ok(`${git.gitRoot}: ${repo}, in the Capy project "${projectName}".`)
+        const gitRoot = git.gitRoot ?? folder
+        const listed = linked.some((f) => samePath(f.realRoot ?? f.root, gitRoot) || samePath(f.root, gitRoot))
+        if (workspace.kind === "worktree") ok(resolution.value.note ?? "Capy works in a new worktree for each session.")
+        else if (listed) ok("The folder is linked to this device. Capy edits it in place.")
+        else note(`The local list of linked folders does not show this folder. Capy checks it when the first thread starts. If Capy refuses it:\n        ${toText(notLinked, "        ")}`)
+      }
     }
   }
 

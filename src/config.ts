@@ -13,8 +13,11 @@ export interface AdapterConfig {
   readonly pricingUrl: string
   readonly defaultModel: string
   readonly defaultReasoning: string
-  /** `linked` edits the folder the client opened; `worktree` gives each session a fresh Capy worktree. */
-  readonly workspaceMode: "linked" | "worktree"
+  /**
+   * `linked` edits the folder the client opened; `worktree` gives each session a fresh Capy worktree;
+   * `cloud` runs each session's thread on a Capy cloud machine, with no device and no local folder.
+   */
+  readonly workspaceMode: "linked" | "worktree" | "cloud"
   /** Run unlinked clones in a worktree cut from another linked folder of the same repo. */
   readonly allowWorktreeFallback: boolean
   /** How long a prompt stays open while the thread is `waiting` on a background command. */
@@ -52,7 +55,7 @@ export const readConfig = (env: NodeJS.ProcessEnv = process.env): AdapterConfig 
     pricingUrl: env.CAPY_ACP_PRICING_URL ?? "https://docs.capy.ai/models-and-pricing.md",
     defaultModel: env.CAPY_ACP_MODEL ?? "anthropic/claude-opus-5-5",
     defaultReasoning: env.CAPY_ACP_REASONING ?? "high",
-    workspaceMode: env.CAPY_ACP_WORKSPACE === "worktree" ? "worktree" : "linked",
+    workspaceMode: env.CAPY_ACP_WORKSPACE === "worktree" || env.CAPY_ACP_WORKSPACE === "cloud" ? env.CAPY_ACP_WORKSPACE : "linked",
     allowWorktreeFallback: flag(env.CAPY_ACP_ALLOW_WORKTREE_FALLBACK),
     waitingLimitMs: Number.isFinite(waiting) && waiting >= 0 ? waiting : 10 * 60_000,
     forwardHostInstructions: flag(env.CAPY_ACP_FORWARD_HOST_INSTRUCTIONS),

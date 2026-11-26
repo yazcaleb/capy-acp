@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, Layer } from "effect"
 import { HttpClient, type HttpClientRequest, HttpClientResponse } from "effect/http"
 import { TestClock } from "effect/testing"
-import { CapyClient, make } from "../src/capy/client.js"
+import { CapyClient, isTransient, make } from "../src/capy/client.js"
 import { readConfig } from "../src/config.js"
 
 const dirs: Array<string> = []
@@ -52,6 +52,57 @@ describe("Capy client", () => {
       writeFileSync(file, "capy_test_key\n", { mode: 0o600 })
       yield* CapyClient.use((capy) => capy.listModels).pipe(Effect.provide(layer))
       expect(seen[0]?.headers.authorization).toBe("Bearer capy_test_key")
+    }))
+
+  it.effect("lists a project's threads, reading the fields a report uses", () =>
+    Effect.gen(function*() {
+      process.env.CAPY_API_KEY = "capy_test_key"
+      const seen: Array<HttpClientRequest.HttpClientRequest> = []
+      const thread = {
+        id: "jam_1",
+        projectId: "project 1",
+        title: null,
+        status: "waiting",
+        lastModelId: "anthropic/claude-opus-5-5",
+        usage: { llmCredits: 10, imageCredits: 0, vmCredits: 5, totalCredits: 15 },
+        createdAt: "2026-11-26T10:00:00Z",
+        updatedAt: "2026-11-26T10:00:00Z",
+        lastActivityAt: null,
+        needsYou: true,
+        ask: { key: "k", kind: "conversation", text: "Which branch?", causeKey: null },
+        captain: { id: "jam_c" }
+      }
+      const layer = client(keyDir(), transport(seen, () => ({ status: 200, body: { items: [thread], cursor: null } })))
+      const threads = yield* CapyClient.use((capy) => capy.listThreads("project 1", { limit: 5 })).pipe(Effect.provide(layer))
+      expect(seen[0]?.url).toBe("https://capy.test/api/v1/threads?projectId=project%201&limit=5")
+      expect(threads).toEqual([
+        {
+          id: "jam_1",
+          projectId: "project 1",
+          title: null,
+          status: "waiting",
+          lastModelId: "anthropic/claude-opus-5-5",
+          usage: { llmCredits: 10, imageCredits: 0, vmCredits: 5, totalCredits: 15 },
+          createdAt: "2026-11-26T10:00:00Z",
+          updatedAt: "2026-11-26T10:00:00Z",
+          lastActivityAt: null,
+          needsYou: true,
+          ask: { kind: "conversation", text: "Which branch?" }
+        }
+      ])
+      delete process.env.CAPY_API_KEY
+    }))
+
+  it.effect("does not retry a response it cannot read, and does not call it a network problem", () =>
+    Effect.gen(function*() {
+      process.env.CAPY_API_KEY = "capy_test_key"
+      const seen: Array<HttpClientRequest.HttpClientRequest> = []
+      const layer = client(keyDir(), transport(seen, () => ({ status: 200, body: { id: "jam_odd", status: "queued" } })))
+      const error = yield* Effect.flip(CapyClient.use((capy) => capy.getThread("jam_odd")).pipe(Effect.provide(layer)))
+      expect(error).toMatchObject({ _tag: "CapyTransportError", decode: true })
+      expect(isTransient(error)).toBe(false)
+      expect(seen).toHaveLength(1)
+      delete process.env.CAPY_API_KEY
     }))
 
   it.effect("retries a rate limit after Capy's retry-after, but not one longer than a minute", () =>

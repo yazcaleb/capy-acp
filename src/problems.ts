@@ -9,7 +9,19 @@ export interface Problem {
   /** Why, in one or two sentences. */
   readonly detail: string
   readonly steps: ReadonlyArray<string>
+  /** The one next step for a calling agent, which reads it literally and cannot ask the person mid-call. */
+  readonly nextAction?: NextAction
 }
+
+/**
+ * What a calling agent does next: run an exact command, ask the person exactly this, try again after
+ * a delay, or call again with another value for one option.
+ */
+export type NextAction =
+  | { readonly kind: "run_command"; readonly command: string }
+  | { readonly kind: "ask_human"; readonly say: string }
+  | { readonly kind: "retry"; readonly afterMs: number }
+  | { readonly kind: "use_option"; readonly option: string; readonly why: string }
 
 /** An Error that carries a Problem, for code paths that throw. */
 export class ProblemError extends Error {
@@ -63,7 +75,7 @@ export const noDevice = (files: ReadonlyArray<DeviceFile>): Problem => ({
   title: "Start Capy on this computer",
   detail: "Capy threads run on this computer, and capy-acp found no Capy device here.",
   steps: [
-    "Open the Capy desktop app and sign in, or run `capy dock` on a computer without a screen.",
+    "Run `npx -y capy-acp --setup` in a terminal in this folder: it sets this computer up as a Capy device with `capy dock` and links the folder. Or open the Capy desktop app and sign in.",
     RETRY,
     `capy-acp looked in ${files.map((file) => `${file.path} (${file.found === "missing" ? "missing" : "no device in it"})`).join(" and ")}. Capy desktop 0.10.0 writes device-ids.json when it starts, and older versions may not, so update the desktop app if you use it. Or set \`CAPY_DEVICE_ID\` to this computer's device id.`
   ]

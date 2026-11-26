@@ -1,5 +1,6 @@
 /**
- * The ACP agent: maps ACP sessions to Capy threads on this machine's Capy device.
+ * The ACP agent: maps ACP sessions to Capy threads on this machine's Capy device, or on Capy cloud
+ * machines with `CAPY_ACP_WORKSPACE=cloud`.
  *
  * One ACP session is one Capy thread, created on the first prompt (Capy needs the first message
  * to create a thread). The session → thread mapping is saved (store.ts), so `session/load` (which
@@ -12,8 +13,10 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { SessionConfigOption, SessionUpdate } from "@agentclientprotocol/sdk"
 import { Cause, Deferred, Effect, Exit, type Layer, ManagedRuntime } from "effect"
 import { CapyClient, type CapyError, describeError, isCapyError, type Model, layer as capyLayer } from "./capy/client.js"
+import type { Message } from "./capy/events.js"
 import { type ChangeTracker, makeChangeTracker, makeWorktreeTracker } from "./changes.js"
 import type { AdapterConfig } from "./config.js"
+import { pullRequestLinks } from "./delegate.js"
 import { fetchPrices, formatCredits, modelDescription, modelLabel, type Price } from "./pricing.js"
 import { noApiKey, type Problem, problemOf, rejectedApiKey, toMarkdown, unreachable } from "./problems.js"
 import { promptParts } from "./prompt.js"
@@ -22,13 +25,23 @@ import { makeSessionStore, type SessionRecord } from "./store.js"
 import { history } from "./translate.js"
 import { fileLink, runTurn, titleOf } from "./turn.js"
 import { AGENT_NAME, AGENT_VERSION } from "./version.js"
-import { readDevice, readGit, readLinkedFolders, resolveWorkspace, type ResolvedWorkspace } from "./workspace.js"
+import {
+  type CloudWorkspace,
+  type DeviceWorkspace,
+  readDevice,
+  readGit,
+  readLinkedFolders,
+  resolveCloud,
+  resolveWorkspace,
+  type ResolvedWorkspace
+} from "./workspace.js"
 
 /** Where a session's threads run. Replaced as a whole when a prompt re-checks the folder. */
 interface Setup {
   /** Undefined when the folder cannot run Capy threads; `problem` then says why and how to fix it. */
-  resolved: ResolvedWorkspace | undefined
+  resolved: ResolvedWorkspace<DeviceWorkspace | CloudWorkspace> | undefined
   problem: Problem | undefined
+  /** Empty for a cloud session, which has no device. */
   deviceId: string
   /** Watches the folder the thread works in, so the adapter can show the diffs. */
   changes: ChangeTracker | undefined
@@ -48,6 +61,8 @@ interface SessionState extends Setup {
   cancel: Deferred.Deferred<void> | undefined
   /** The thread's `usage.totalCredits` after the last turn, to report what each turn added. */
   credits: number | undefined
+  /** The pull request or branch note last shown, so a cloud session shows each one once. */
+  delivered: string | undefined
 }
 
 /** A Capy stream event id (a ULID), the only thing a stream cursor may be. */
@@ -61,6 +76,54 @@ const isNotLinked = (error: CapyError) => error._tag === "CapyApiError" && /does
 /** The reasoning level a session really sends: its own when the model offers it, else the model's highest. */
 const effectiveReasoning = (reasoning: string, modes: ReadonlyArray<string>): string | undefined =>
   modes.includes(reasoning) ? reasoning : modes.at(-1)
+
+/** GitHub links that exist only for a pushed branch: a compare (its head), or a new pull request. */
+const BRANCH_LINK = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:compare\/\S+?\.\.\.|pull\/new\/)([^\s)\]>`'"#?]+)/g
+/** A tree link, which counts only in a line that says something was pushed (it can name any file). */
+const TREE_LINK = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/tree\/([^\s)\]>`'"#?]+)/g
+/** A branch named in a line that says it was pushed: "Pushed the branch `capy/fix-login`". */
+const PUSHED_BRANCH = /\bbranch\s+`([^`\s]+)`/gi
+
+/**
+ * Branches that Capy's replies say it pushed, first mention first, as `[repo, branch]`. The stream never
+ * shows git commands, so the replies are the only record. `repo` is the session's, for branches named
+ * without a link.
+ */
+export const pushedBranches = (messages: ReadonlyArray<Message>, repo: string): ReadonlyArray<readonly [string, string]> => {
+  const found = new Map<string, readonly [string, string]>()
+  const add = (owner: string, branch: string) => {
+    const name = branch.replace(/[.,;:!]+$/, "")
+    if (name !== "" && !found.has(`${owner.toLowerCase()}#${name}`)) found.set(`${owner.toLowerCase()}#${name}`, [owner, name])
+  }
+  for (const message of messages) {
+    if (message.source !== "assistant" || message.text === undefined) continue
+    for (const line of message.text.split("\n")) {
+      const pushed = /\bpush/i.test(line)
+      const links = [...line.matchAll(BRANCH_LINK), ...(pushed ? line.matchAll(TREE_LINK) : [])].sort((a, b) => a.index - b.index)
+      for (const [, owner, branch] of links) add(owner!, branch!)
+      if (links.length === 0 && pushed) for (const [, branch] of line.matchAll(PUSHED_BRANCH)) add(repo, branch!)
+    }
+  }
+  return [...found.values()]
+}
+
+/**
+ * What a cloud thread left on GitHub, in one line for the end of a reply: its pull requests, else the
+ * branches it pushed. Undefined when there is neither. The files stay on Capy's machine, so this is how
+ * the user gets the work.
+ */
+export const deliveryNote = (messages: ReadonlyArray<Message>, repo: string): string | undefined => {
+  const pulls = pullRequestLinks(messages)
+  if (pulls.length > 0) return `Pull request${pulls.length === 1 ? "" : "s"}: ${pulls.map((p) => p.url).join(", ")}`
+  const branches = pushedBranches(messages, repo)
+  if (branches.length === 0) return undefined
+  return branches
+    .map(([owner, branch]) => {
+      const fetch = owner.toLowerCase() === repo.toLowerCase() ? ` Get it with \`git fetch origin ${branch}\`.` : ""
+      return `Capy pushed the branch \`${branch}\`: https://github.com/${owner}/tree/${branch}.${fetch}`
+    })
+    .join("\n")
+}
 
 export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> = capyLayer(config)) => {
   const runtime = ManagedRuntime.make(capy)
@@ -144,6 +207,18 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
     })
   }
 
+  /**
+   * Ends a cloud session's reply with the pull requests or branches its thread left on GitHub, the first
+   * time each set shows up. Never fails the prompt: without the transcript, nothing is shown.
+   */
+  const reportDelivery = async (session: SessionState, repo: string, say: (text: string) => Promise<unknown>) => {
+    const exit = await runtime.runPromiseExit(withCapy((capy) => capy.listMessages(session.threadId!)))
+    const note = Exit.isSuccess(exit) ? deliveryNote(exit.value, repo) : undefined
+    if (note === undefined || note === session.delivered) return
+    session.delivered = note
+    await say(`\n\n${note}`)
+  }
+
   /** The thread's credit total, or undefined when Capy does not answer. Never fails the prompt. */
   const readCredits = async (threadId: string) => {
     const exit = await runtime.runPromiseExit(withCapy((capy) => capy.getThread(threadId)))
@@ -207,6 +282,18 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
 
   /** Folder → project → device workspace. Never throws: failures become the session's `problem`. */
   const setUp = async (cwd: string, threadId: () => string | undefined): Promise<Setup> => {
+    if (config.workspaceMode === "cloud") {
+      // A cloud machine clones the repository itself: no device, no linked folder, no diffs to read.
+      const projects = await attempt(withCapy((capy) => capy.listProjects)).then(
+        (value) => ({ ok: true as const, value }),
+        (reason: unknown) => ({ ok: false as const, reason })
+      )
+      if (!projects.ok) return { deviceId: "", resolved: undefined, problem: setupProblem(projects.reason), changes: undefined }
+      const resolution = resolveCloud({ cwd, ...(await readGit(cwd)), projects: projects.value })
+      return resolution._tag === "Unresolved"
+        ? { deviceId: "", resolved: undefined, problem: resolution.problem, changes: undefined }
+        : { deviceId: "", resolved: resolution.value, problem: undefined, changes: undefined }
+    }
     const [projects, device, linked, git] = await Promise.allSettled([
       attempt(withCapy((capy) => capy.listProjects)),
       readDevice(config),
@@ -269,7 +356,8 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
       busy: false,
       closed: false,
       cancel: undefined,
-      credits: undefined
+      credits: undefined,
+      delivered: undefined
     }
     sessions.set(sessionId, session)
     log(
@@ -425,6 +513,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         else if (session.credits === undefined) session.credits = (await readCredits(session.threadId))?.totalCredits
         const reasoningModes = (await loadModels().catch(() => [] as ReadonlyArray<Model>)).find((m) => m.id === session.model)?.reasoningModes ?? []
         const reasoningMode = effectiveReasoning(session.reasoning, reasoningModes)
+        const workspace = resolved.workspace
         const exit = await runtime.runPromiseExit(
           runTurn({
             changes: session.changes,
@@ -441,7 +530,9 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
                 return persist(params.sessionId, session)
               }),
             model: { modelId: session.model, ...(reasoningMode === undefined ? {} : { reasoningMode }) },
-            target: { projectId: resolved.projectId, deviceId: session.deviceId, workspace: resolved.workspace },
+            target: workspace.kind === "cloud"
+              ? { projectId: resolved.projectId, workspace }
+              : { projectId: resolved.projectId, deviceId: session.deviceId, workspace },
             waitingLimitMs: config.waitingLimitMs,
             cancelled: Deferred.await(cancel),
             emit
@@ -481,6 +572,7 @@ export const makeAgent = (config: AdapterConfig, capy: Layer.Layer<CapyClient> =
         session.cursor = result.cursor
         if (session.threadId !== undefined) session.title ??= titleOf(text || files.map((f) => f.name).join(", "))
         await persist(params.sessionId, session)
+        if (session.threadId !== undefined && workspace.kind === "cloud") await reportDelivery(session, resolved.repo, say)
         if (session.threadId !== undefined) await reportCredits(session, notify)
         if (session.threadId !== undefined) log(`session ${params.sessionId}: thread ${session.threadId} → ${result.stopReason}`)
         return { stopReason: result.stopReason }

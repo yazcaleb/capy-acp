@@ -1,12 +1,12 @@
 /**
- * `capy-acp --setup`: saves a Capy API key on this machine. ACP clients run it as the agent's
- * terminal auth method; people can run it directly too. The key is checked against Capy before it
- * is saved, and is never printed.
+ * `capy-acp --setup`: saves a Capy API key on this machine, then gives the machine a Capy device if it
+ * has none. ACP clients run it as the agent's terminal auth method; people can run it directly too.
+ * The key is checked against Capy before it is saved, and is never printed.
  */
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import type { AdapterConfig } from "./config.js"
-import { readDevice } from "./workspace.js"
+import { type MachineIo, nodeMachineIo, setupMachine } from "./machine.js"
 
 /** The terminal auth method that `initialize` announces. */
 export const API_KEY_AUTH = {
@@ -22,6 +22,8 @@ export interface SetupIo {
   readonly readSecret: (prompt: string) => Promise<string>
   readonly write: (text: string) => void
   readonly fetch: typeof fetch
+  /** Runs programs and writes files for the device step; the real computer when absent. */
+  readonly machine?: MachineIo
 }
 
 /** The key from `CAPY_API_KEY` or the key file, or undefined when neither has one. */
@@ -32,7 +34,10 @@ export const savedApiKey = async (config: AdapterConfig): Promise<string | undef
   return fromFile || undefined
 }
 
-/** Returns the exit code: 0 when a key is saved and accepted. */
+/**
+ * Returns the exit code: 0 when a key is saved and the device step did not fail. After the key, a
+ * computer without a Capy device gets one (see machine.ts), with the person's consent at each step.
+ */
 export const runSetup = async (config: AdapterConfig, io: SetupIo): Promise<number> => {
   io.write(`capy-acp setup. The key goes to ${config.apiKeyFile} (readable only by you).\n`)
   const key = (await io.readSecret("Capy API key: ")).trim()
@@ -56,11 +61,8 @@ export const runSetup = async (config: AdapterConfig, io: SetupIo): Promise<numb
       ? "Capy accepted the key. Saved.\n"
       : `Saved, but capy-acp could not check the key with Capy (${check}).\n`
   )
-  await readDevice(config).then(
-    (device) => io.write(`Capy device on this machine: ${device.id}.\n`),
-    (error: unknown) => io.write(`${error instanceof Error ? error.message : String(error)}\n`)
-  )
-  return 0
+  const machine = await setupMachine(config, io.machine ?? nodeMachineIo(), io.write)
+  return machine.status === "failed" ? 1 : 0
 }
 
 /** Reads a line from the terminal with echo off, or the first line of piped input. */

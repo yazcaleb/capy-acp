@@ -12,14 +12,13 @@ import { Duration, Effect, Option, Result, Stream } from "effect"
 import { CapyClient, type CapyError, CapyTransportError, describeError, type FileUpload, isTransient, type MessageFile, type ModelSelection } from "./capy/client.js"
 import type { MessageAttachment } from "./capy/events.js"
 import type { ChangeTracker, FileChange } from "./changes.js"
-import type { DeviceWorkspace } from "./workspace.js"
+import type { CloudWorkspace, DeviceWorkspace } from "./workspace.js"
 import { closedTools, fileChangeUpdate, finishTools, initialTurn, step, turnComplete, type TurnSignal, type TurnState } from "./translate.js"
 
-export interface ThreadTarget {
-  readonly projectId: string
-  readonly deviceId: string
-  readonly workspace: DeviceWorkspace
-}
+/** A workspace on a Capy device, or a Capy cloud machine (no device). */
+export type ThreadTarget =
+  | { readonly projectId: string; readonly deviceId: string; readonly workspace: DeviceWorkspace }
+  | { readonly projectId: string; readonly workspace: CloudWorkspace }
 
 export interface TurnInput {
   readonly threadId: string | undefined
@@ -72,6 +71,9 @@ const attachedLabel = (files: ReadonlyArray<{ readonly name: string }>) => `Atta
 
 const savedNote = (paths: ReadonlyArray<string>) =>
   paths.length === 0 ? "" : `Attached files, saved on this machine:\n${paths.map((path) => `- ${path}`).join("\n")}`
+
+const followingNote = (files: ReadonlyArray<{ readonly name: string }>) =>
+  files.length === 0 ? "" : `Attached files follow in the next message: ${files.map((f) => f.name).join(", ")}. Wait for them before you answer.`
 
 /** Writes a prompt's files under a fresh directory (owner-only) and returns their paths. */
 const saveAttachments = (dir: string, files: ReadonlyArray<FileUpload>): Effect.Effect<ReadonlyArray<string>, CapyTransportError> =>
@@ -132,12 +134,14 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
     if (tracker !== undefined) yield* tracker.baseline
 
     let threadId = input.threadId
+    const target = input.target
     const attachments = input.files ?? []
     // Thread create takes text only. Files sent right after it race the agent's first step (a
     // fast model answers "no image came through"), so the first message names copies saved on
-    // this machine instead, which is where the device agent runs and can read them. Follow-ups
-    // upload first, so a failed upload sends nothing.
-    const prepare = threadId === undefined
+    // this machine instead, which is where the device agent runs and can read them. A cloud
+    // machine cannot read them, so there the files are uploaded and follow the create. Uploads
+    // come first, so a failed upload sends nothing.
+    const prepare = threadId === undefined && "deviceId" in target
       ? (attachments.length === 0 ? Effect.succeed([]) : saveAttachments(input.attachmentsDir, attachments)).pipe(
         Effect.map((saved) => ({ saved, uploaded: [] as ReadonlyArray<MessageFile> }))
       )
@@ -149,16 +153,26 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
     const { saved, uploaded } = prepared.value
 
     if (threadId === undefined) {
-      const text = [input.text, savedNote(saved)].filter((part) => part !== "").join("\n\n")
+      const text = [input.text, savedNote(saved), followingNote(uploaded)].filter((part) => part !== "").join("\n\n")
       const thread = yield* capy.createThread({
         requestId: randomUUID(),
-        projectId: input.target.projectId,
+        projectId: target.projectId,
         title: titleOf(input.text !== "" ? input.text : attachments.map((f) => f.name).join(", ")),
         message: text,
         model: input.model,
-        device: { deviceId: input.target.deviceId, workspace: input.target.workspace }
+        // No device: Capy runs the thread on a cloud machine.
+        ...("deviceId" in target ? { device: { deviceId: target.deviceId, workspace: target.workspace } } : {})
       })
       threadId = thread.id
+      if (uploaded.length > 0) {
+        // The thread exists now, so a failure here is reported in the reply rather than failing the turn.
+        const delivered = yield* Effect.result(
+          capy.sendMessage(threadId, { text: attachedLabel(uploaded), clientKey: randomUUID(), model: input.model, files: uploaded, delivery: "steer" })
+        )
+        if (Result.isFailure(delivered)) {
+          yield* input.emit(chunk(`**The attached files did not reach Capy** (${describeError(delivered.failure)}). Attach them again to your next message.\n\n`))
+        }
+      }
     } else {
       const text = input.text !== "" ? input.text : attachedLabel(uploaded)
       yield* capy.sendMessage(threadId, { text, clientKey: randomUUID(), model: input.model, ...(uploaded.length > 0 ? { files: uploaded } : {}) })
@@ -363,8 +377,11 @@ export const runTurn = (input: TurnInput): Effect.Effect<TurnResult, CapyError, 
     if (outcome === "not-started") {
       yield* input.emit(
         chunk(
-          "**Capy has not started on this message yet.** Check that the Capy desktop app or `capy dock` runs on this computer " +
-            "and is signed in. The message stays in the queue, and Capy starts it when the device is back."
+          "deviceId" in target
+            ? "**Capy has not started on this message yet.** Check that the Capy desktop app or `capy dock` runs on this computer " +
+                "and is signed in. The message stays in the queue, and Capy starts it when the device is back."
+            : "**Capy has not started on this message yet.** Its cloud machine may still be starting. The message stays in the " +
+                "queue, and the Capy app shows the thread."
         )
       )
     }

@@ -8,7 +8,7 @@ import * as acp from "@agentclientprotocol/sdk"
 import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Layer, Stream } from "effect"
-import { makeAgent } from "../src/agent.js"
+import { deliveryNote, makeAgent, pushedBranches } from "../src/agent.js"
 import { CapyApiError, CapyClient, CapyConfigError, type CreateThread, type SendMessage } from "../src/capy/client.js"
 import type { CapyEvent, Message } from "../src/capy/events.js"
 import { readConfig } from "../src/config.js"
@@ -74,6 +74,7 @@ const fakeCapy = (log: Log, turns: Array<Array<CapyEvent>>, overrides: Partial<C
       sendMessage: (threadId, body) => Effect.sync(() => (log.sends.push({ threadId, body }), { id: "msg" })),
       interrupt: () => Effect.void,
       getThread: (id) => Effect.succeed({ id, status: "idle" as const }),
+      listThreads: () => Effect.succeed([]),
       uploadFiles: (files) => Effect.succeed(files.map((f, i) => ({ fileId: `file_${i}`, name: f.name }))),
       listMessages: () => Effect.succeed(transcript),
       attachmentUrl: () => Effect.fail({ _tag: "CapyTransportError", message: "no" } as never),
@@ -277,6 +278,38 @@ describe("agent sessions", () => {
     await client.close()
   })
 
+  it("runs cloud sessions with no device or linked folder, and ends a reply with the pull request once", async () => {
+    const { repo, config, home } = machine()
+    rmSync(join(home, "capy"), { recursive: true, force: true })
+    const cloud = { ...config, workspaceMode: "cloud" as const, deviceIdOverride: undefined }
+    const log: Log = { creates: [], sends: [], streams: [] }
+    const reply = "Opened https://github.com/acme/app/pull/7 with the fix."
+    const client = await connect(
+      cloud,
+      fakeCapy(log, [turn("01A", reply), turn("01B", "Done.")], {
+        listMessages: () => Effect.succeed([{ id: "01A", source: "assistant" as const, text: reply }])
+      })
+    )
+    const { sessionId } = await client.agent.request(acp.methods.agent.session.new, { cwd: repo, mcpServers: [] })
+    const prompt = (text: string) => client.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: "text", text }] })
+    const text = () => client.updates.flatMap((u) => (u.sessionUpdate === "agent_message_chunk" && u.content.type === "text" ? [u.content.text] : [])).join("")
+
+    expect((await prompt("fix the login")).stopReason).toBe("end_turn")
+    expect(log.creates).toHaveLength(1)
+    expect(log.creates[0]).not.toHaveProperty("device")
+    expect(log.creates[0]).toMatchObject({ projectId: "project_TEST", message: "fix the login" })
+    expect(text()).toContain("on a Capy cloud machine (CAPY_ACP_WORKSPACE=cloud)")
+    expect(text()).toContain(reply)
+    expect(text().endsWith("\n\nPull request: https://github.com/acme/app/pull/7")).toBe(true)
+    expect(client.updates.some((u) => u.sessionUpdate === "tool_call_update" && u.kind === "edit")).toBe(false)
+
+    // The next turn has the same pull request: it is not shown again.
+    await prompt("thanks")
+    expect(log.sends).toHaveLength(1)
+    expect(text().split("Pull request:")).toHaveLength(2)
+    await client.close()
+  })
+
   it("refuses a second prompt while the first is still setting up", async () => {
     const { repo, config } = machine()
     const log: Log = { creates: [], sends: [], streams: [] }
@@ -385,5 +418,32 @@ describe("agent sessions", () => {
     await prompt("three")
     expect(notices().at(-1)).toMatchObject({ title: "Capy credits: $5.00", description: expect.stringContaining("$5.01") })
     await client.close()
+  })
+})
+
+describe("what a cloud thread leaves on GitHub", () => {
+  const said = (...texts: Array<string>): Array<Message> => texts.map((text, i) => ({ id: `m${i}`, source: "assistant", text }))
+
+  it("names the pull requests, first mention first, ahead of any branch", () => {
+    const messages: Array<Message> = [
+      { id: "u", source: "user", text: "see https://github.com/acme/app/pull/1" },
+      ...said("Opened https://github.com/acme/app/pull/9 and pushed branch `capy/x`.", "Also https://capy.ai/pull/acme/app/10.")
+    ]
+    expect(deliveryNote(messages, "acme/app")).toBe("Pull requests: https://github.com/acme/app/pull/9, https://github.com/acme/app/pull/10")
+  })
+
+  it("names pushed branches with a fetch command, and ignores links and branches that were not pushed", () => {
+    const messages = said(
+      "I pushed the branch `capy/fix-login`.",
+      "Open a pull request at https://github.com/acme/app/pull/new/capy/fix-login.",
+      "See https://github.com/acme/app/tree/main/src for the layout, on branch `main`.",
+      "Pushed to https://github.com/dev/fork/tree/capy/other"
+    )
+    expect(pushedBranches(messages, "acme/app")).toEqual([["acme/app", "capy/fix-login"], ["dev/fork", "capy/other"]])
+    expect(deliveryNote(messages, "acme/app")).toBe(
+      "Capy pushed the branch `capy/fix-login`: https://github.com/acme/app/tree/capy/fix-login. Get it with `git fetch origin capy/fix-login`.\n" +
+        "Capy pushed the branch `capy/other`: https://github.com/dev/fork/tree/capy/other."
+    )
+    expect(deliveryNote(said("All done, nothing pushed."), "acme/app")).toBeUndefined()
   })
 })

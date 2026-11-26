@@ -23,6 +23,11 @@ export class CapyApiError extends Data.TaggedError("CapyApiError")<{
 export class CapyTransportError extends Data.TaggedError("CapyTransportError")<{
   readonly message: string
   readonly cause?: unknown
+  /**
+   * Capy answered, but with a body this version cannot read, such as a thread status it does not
+   * know yet. Trying again gives the same answer, so it is never retried.
+   */
+  readonly decode?: boolean
 }> {}
 
 /** Something only the user can fix, such as a missing API key. Never retried. */
@@ -61,7 +66,26 @@ const Usage = Schema.Struct({
   vmCredits: Schema.optionalKey(Schema.Number)
 })
 
-export const Thread = Schema.Struct({ id: Schema.String, status: ThreadStatus, usage: Schema.optionalKey(Usage) })
+const nullable = <S extends Schema.Top>(schema: S) => Schema.optionalKey(Schema.NullOr(schema))
+
+/** Something the thread needs from a person. `kind` is a string, so a new kind never fails the thread. */
+const ThreadAsk = Schema.Struct({ kind: Schema.String, text: nullable(Schema.String) })
+
+// Only id and status are required: other fields are read when present, and fields this adapter
+// does not use are ignored.
+export const Thread = Schema.Struct({
+  id: Schema.String,
+  status: ThreadStatus,
+  usage: Schema.optionalKey(Usage),
+  title: nullable(Schema.String),
+  projectId: nullable(Schema.String),
+  lastModelId: nullable(Schema.String),
+  ask: nullable(ThreadAsk),
+  needsYou: nullable(Schema.Boolean),
+  createdAt: nullable(Schema.String),
+  updatedAt: nullable(Schema.String),
+  lastActivityAt: nullable(Schema.String)
+})
 export type Thread = typeof Thread.Type
 
 const Receipt = Schema.Struct({ id: Schema.String })
@@ -95,16 +119,31 @@ export interface ModelSelection {
   readonly reasoningMode?: string
 }
 
+/** Cloud machine sizes, smallest first. Absent from a create, the project's size applies. */
+export const MACHINE_SIZES = ["small", "medium", "large", "ultra", "hyper", "bigguy"] as const
+export type MachineSize = (typeof MACHINE_SIZES)[number]
+
+/**
+ * Where on a device a thread works. A worktree with `repos` needs no local folder: the device makes it
+ * from the repository on its own, and `startFromOrigin` starts it from the GitHub remote.
+ */
+export type DeviceWorkspaceTarget =
+  | { readonly kind: "linked"; readonly root: string }
+  | { readonly kind: "worktree"; readonly repos?: ReadonlyArray<string>; readonly startFromOrigin?: boolean; readonly root?: string }
+
 export interface CreateThread {
   readonly requestId: string
   readonly projectId: string
   readonly title?: string
   readonly message: string
   readonly model: ModelSelection
-  readonly device: {
+  /** Absent, the thread runs on a Capy cloud machine, whose time costs Capy credits. */
+  readonly device?: {
     readonly deviceId: string
-    readonly workspace: { readonly kind: "linked"; readonly root: string } | { readonly kind: "worktree" }
+    readonly workspace: DeviceWorkspaceTarget
   }
+  /** Cloud threads only. */
+  readonly machineSize?: MachineSize
 }
 
 export interface SendMessage {
@@ -124,6 +163,8 @@ export class CapyClient extends Context.Service<
     readonly sendMessage: (threadId: string, body: SendMessage) => Effect.Effect<{ readonly id: string }, CapyError>
     readonly interrupt: (threadId: string) => Effect.Effect<void, CapyError>
     readonly getThread: (threadId: string) => Effect.Effect<Thread, CapyError>
+    /** One page of a project's threads, as Capy orders them. */
+    readonly listThreads: (projectId: string, options: { readonly limit: number }) => Effect.Effect<ReadonlyArray<Thread>, CapyError>
     /** Uploads files for a message, in order. The bytes go straight to storage through presigned URLs. */
     readonly uploadFiles: (files: ReadonlyArray<FileUpload>) => Effect.Effect<ReadonlyArray<MessageFile>, CapyError>
     /** The whole committed transcript, oldest first. */
@@ -145,7 +186,7 @@ const MAX_RETRY_AFTER_MS = 60_000
 
 const retryDelay = (error: CapyError, attempt: number): number | undefined => {
   if (attempt >= MAX_ATTEMPTS) return undefined
-  if (error._tag === "CapyTransportError") return 500 * 2 ** attempt
+  if (error._tag === "CapyTransportError") return error.decode === true ? undefined : 500 * 2 ** attempt
   if (error._tag === "CapyConfigError" || !RETRYABLE_STATUS.has(error.status)) return undefined
   const delay = error.retryAfterMs ?? 1000 * 2 ** attempt
   return delay > MAX_RETRY_AFTER_MS ? undefined : delay
@@ -153,7 +194,7 @@ const retryDelay = (error: CapyError, attempt: number): number | undefined => {
 
 /** Network trouble, rate limits and server errors: worth trying again later, unlike a rejected request. */
 export const isTransient = (error: CapyError): boolean =>
-  error._tag === "CapyTransportError" || (error._tag === "CapyApiError" && (error.status === 429 || error.status >= 500))
+  (error._tag === "CapyTransportError" && error.decode !== true) || (error._tag === "CapyApiError" && (error.status === 429 || error.status >= 500))
 
 /** One line for the user: Capy's own tag and message when it sent them. */
 export const describeError = (error: CapyError): string =>
@@ -238,7 +279,12 @@ export const make = (config: AdapterConfig) =>
           Effect.mapError((error) =>
             error instanceof CapyApiError || error instanceof CapyTransportError || error instanceof CapyConfigError
               ? error
-              : new CapyTransportError({ message: `Unexpected Capy API response: ${String(error)}`, cause: error })
+              : new CapyTransportError({
+                message: `Unexpected Capy API response: ${String(error)}`,
+                cause: error,
+                // A body that did not arrive whole is worth another try; one that does not match the schema is not.
+                ...(error instanceof Schema.SchemaError ? { decode: true } : {})
+              })
           ),
           Effect.timeout(Duration.seconds(30)),
           Effect.catchTag("TimeoutError", () => Effect.fail(new CapyTransportError({ message: "Capy API request timed out" })))
@@ -317,6 +363,10 @@ export const make = (config: AdapterConfig) =>
       interrupt: (threadId) =>
         withRetry(send(HttpClientRequest.post(`/threads/${encodeURIComponent(threadId)}/interrupt`))).pipe(Effect.asVoid),
       getThread: (threadId) => json(Thread, HttpClientRequest.get(`/threads/${encodeURIComponent(threadId)}`)),
+      listThreads: (projectId, { limit }) =>
+        json(Page(Thread), HttpClientRequest.get(`/threads?projectId=${encodeURIComponent(projectId)}&limit=${limit}`)).pipe(
+          Effect.map((page) => page.items)
+        ),
       uploadFiles,
       listMessages,
       attachmentUrl: (threadId, fileId) =>

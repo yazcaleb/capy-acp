@@ -9,7 +9,7 @@ import { afterEach } from "@effect/vitest"
 import { CapyClient, type CreateThread, type FileUpload, type SendMessage } from "../src/capy/client.js"
 import type { CapyEvent } from "../src/capy/events.js"
 import type { ChangeTracker, FileChange } from "../src/changes.js"
-import { fileLink, runTurn } from "../src/turn.js"
+import { fileLink, runTurn, type ThreadTarget } from "../src/turn.js"
 import { loadEvents, scenarios } from "./fixtures.js"
 
 const recorded = (model: string, scenario: string) => {
@@ -26,10 +26,11 @@ const fakeCapy = (events: ReturnType<typeof loadEvents>, calls: Array<string>, s
       listModels: Effect.succeed([]),
       listProjects: Effect.succeed([]),
       createThread: (body) =>
-        Effect.sync(() => (calls.push(`create ${body.device.workspace.kind}`), creates.push(body), { id: "jam_test", status: "working" as const })),
+        Effect.sync(() => (calls.push(`create ${body.device?.workspace.kind}`), creates.push(body), { id: "jam_test", status: "working" as const })),
       sendMessage: (_, body) => Effect.sync(() => (calls.push(`message${body.delivery ? ` ${body.delivery}` : ""}`), sent.push(body), { id: "msg" })),
       interrupt: () => Effect.sync(() => void calls.push("interrupt")),
       getThread: () => Effect.succeed({ id: "jam_test", status: "idle" as const }),
+      listThreads: () => Effect.succeed([]),
       uploadFiles: (files) =>
         Effect.sync(() => (files.length > 0 && calls.push(`upload ${files.map((f) => f.name).join(",")}`), files.map((f, i) => ({ fileId: `file_${i}`, name: f.name })))),
       listMessages: () => Effect.succeed([]),
@@ -74,6 +75,7 @@ const run = (input: {
   cursors?: Array<string>
   attachmentsDir?: string
   creates?: Array<CreateThread>
+  target?: ThreadTarget
 }) =>
   Effect.gen(function*() {
     const updates: Array<SessionUpdate> = []
@@ -85,7 +87,7 @@ const run = (input: {
       attachmentsDir: input.attachmentsDir ?? "/nonexistent/attachments",
       onCursor: (_, cursor) => Effect.sync(() => void input.cursors?.push(cursor)),
       model: { modelId: "anthropic/claude-opus-5-5", reasoningMode: "high" },
-      target: { projectId: "project_SPIKE", deviceId: "device_SPIKE", workspace: { kind: "linked", root: "/home/dev/capy-acp-spike/sandbox" } },
+      target: input.target ?? { projectId: "project_SPIKE", deviceId: "device_SPIKE", workspace: { kind: "linked", root: "/home/dev/capy-acp-spike/sandbox" } },
       waitingLimitMs: 60_000,
       cancelled: Effect.never,
       emit: (update) => Effect.sync(() => void updates.push(update)),
@@ -285,6 +287,37 @@ describe("runTurn with attachments", () => {
     }))
 })
 
+describe("runTurn on a Capy cloud machine", () => {
+  const cloud: ThreadTarget = { projectId: "project_SPIKE", workspace: { kind: "cloud" } }
+
+  it.effect("creates the thread with no device and streams the reply and tool items", () =>
+    Effect.gen(function*() {
+      const calls: Array<string> = []
+      const creates: Array<CreateThread> = []
+      const { result, updates } = yield* run({ events: recorded("opus", "s2-edit"), calls, creates, target: cloud })
+      expect(result).toMatchObject({ threadId: "jam_test", stopReason: "end_turn" })
+      expect(creates[0]).not.toHaveProperty("device")
+      expect(creates[0]).toMatchObject({ projectId: "project_SPIKE", message: "edit two files" })
+      expect(updates.some((u) => u.sessionUpdate === "agent_message_chunk")).toBe(true)
+      expect(updates.some((u) => u.sessionUpdate === "tool_call")).toBe(true)
+      // No tracker: the files are on Capy's machine, so no diffs.
+      expect(updates.filter(isTool).some((u) => u.kind === "edit")).toBe(false)
+    }))
+
+  it.effect("uploads a first prompt's files and sends them right after the create, since the machine cannot read this one", () =>
+    Effect.gen(function*() {
+      const calls: Array<string> = []
+      const creates: Array<CreateThread> = []
+      const sent: Array<SendMessage> = []
+      yield* run({ events: recorded("opus", "s1-write"), calls, creates, sent, target: cloud, text: "what is in this image?", files: [png] })
+      expect(calls.slice(0, 3)).toEqual(["upload image-1.png", "create undefined", "message steer"])
+      expect(creates[0]!.message).toBe(
+        "what is in this image?\n\nAttached files follow in the next message: image-1.png. Wait for them before you answer."
+      )
+      expect(sent[0]).toMatchObject({ text: "Attached: image-1.png", files: [{ fileId: "file_0", name: "image-1.png" }], delivery: "steer" })
+    }))
+})
+
 describe("fileLink", () => {
   it.effect("links a file Capy made on this machine to its path, in the form Capy reports it", () =>
     Effect.gen(function*() {
@@ -322,6 +355,7 @@ describe("runTurn end of turn", () => {
           sendMessage: () => Effect.succeed({ id: "msg" }),
           interrupt: () => Effect.void,
           getThread: () => Effect.succeed({ id: "jam_test", status: "idle" as const }),
+          listThreads: () => Effect.succeed([]),
           uploadFiles: () => Effect.succeed([]),
           listMessages: () => Effect.succeed([]),
           attachmentUrl: () => Effect.succeed(""),

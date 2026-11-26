@@ -145,6 +145,24 @@ describe("capy-acp --doctor", () => {
     expect(other.text).toContain("No Capy project includes acme/app")
   })
 
+  it("skips the device and link checks in cloud mode, and says why", async () => {
+    const m = machine({ device: false, linked: false })
+    const cloud = { ...m, config: { ...m.config, workspaceMode: "cloud" as const } }
+    const { code, text } = await doctor(cloud, m.repo)
+    expect(code).toBe(0)
+    expect(text).toContain(
+      "note  CAPY_ACP_WORKSPACE=cloud: threads run on Capy cloud machines, so this skips the device and linked folder checks. Machine time costs Capy credits."
+    )
+    expect(text).toContain('acme/app, in the Capy project "App". A cloud machine clones it from GitHub.')
+    expect(text).not.toContain("Start Capy on this computer")
+    expect(text).not.toContain("linked folders does not show")
+    expect(text).toContain("Ready.")
+    // The folder still needs a project.
+    const other = await doctor(cloud, m.repo, async () => [{ id: "proj_2", name: "Other", repos: [{ repoFullName: "acme/other" }] }])
+    expect(other.code).toBe(1)
+    expect(other.text).toContain("No Capy project includes acme/app")
+  })
+
   it("only notes a folder that the local list does not show, because Capy decides", async () => {
     const m = machine({ linked: false })
     const { code, text } = await doctor(m, m.repo)

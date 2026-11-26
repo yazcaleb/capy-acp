@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { desktopConfigDir, readConfig } from "../src/config.js"
-import { parseRemote, readDevice, readGit, resolveWorkspace, samePath } from "../src/workspace.js"
+import { parseRemote, readDevice, readGit, resolveCloud, resolveWorkspace, samePath } from "../src/workspace.js"
 import { problemOf } from "../src/problems.js"
 
 const dirs: Array<string> = []
@@ -91,6 +91,25 @@ describe("resolveWorkspace", () => {
   it("falls back to a worktree of another linked clone only when allowed", () => {
     const resolution = resolveWorkspace({ ...base, allowWorktreeFallback: true, linked: [{ root: "/w/other", repos: ["acme/app"] }] })
     expect(resolution).toMatchObject({ _tag: "Resolved", value: { workspace: { kind: "worktree" }, note: expect.stringContaining("/w/other") } })
+  })
+})
+
+describe("resolveCloud", () => {
+  const cloud = { cwd: "/w/app", gitRoot: "/w/app", repos: ["acme/app"], projects }
+
+  it("needs only the folder's GitHub remote and a project for it, and says machine time costs credits", () => {
+    expect(resolveCloud(cloud)).toMatchObject({
+      _tag: "Resolved",
+      value: { projectId: "project_TEST", repo: "acme/app", workspace: { kind: "cloud" }, note: expect.stringContaining("Machine time costs Capy credits") }
+    })
+    expect(readConfig({ CAPY_ACP_WORKSPACE: "cloud" }).workspaceMode).toBe("cloud")
+    expect(readConfig({ CAPY_ACP_WORKSPACE: "elsewhere" }).workspaceMode).toBe("linked")
+  })
+
+  it("gives the same fixes as a device session for a folder Capy cannot place", () => {
+    expect(resolveCloud({ ...cloud, gitRoot: undefined })).toMatchObject({ _tag: "Unresolved", problem: { title: "Open a repository to use Capy" } })
+    expect(resolveCloud({ ...cloud, repos: [] })).toMatchObject({ _tag: "Unresolved", problem: { title: "Add the GitHub remote" } })
+    expect(resolveCloud({ ...cloud, projects: [] })).toMatchObject({ _tag: "Unresolved", problem: { title: "Add acme/app to a Capy project" } })
   })
 })
 
