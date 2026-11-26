@@ -32,8 +32,11 @@ export const savedApiKey = async (config: AdapterConfig): Promise<string | undef
  */
 export const runSetup = async (config: AdapterConfig, io: SetupIo): Promise<number> => {
   io.write(`${config.product.name} setup. It saves ${SHARED_KEY}, in ${config.apiKeyFile} (readable only by you).\n`)
-  const key = (await io.readSecret("Capy API key: ")).trim()
-  if (key === "") {
+  // Running setup again, for example to set up a device, should not need the key pasted again.
+  const saved = await savedApiKey(config)
+  const typed = (await io.readSecret(saved === undefined ? "Capy API key: " : "Capy API key (press Enter to keep the saved key): ")).trim()
+  const key = typed === "" ? saved : typed
+  if (key === undefined) {
     io.write("No key entered. Nothing was saved.\n")
     return 1
   }
@@ -41,8 +44,13 @@ export const runSetup = async (config: AdapterConfig, io: SetupIo): Promise<numb
     .fetch(`${config.apiUrl}/projects`, { headers: { authorization: `Bearer ${key}`, accept: "application/json" } })
     .then((response) => response.status, (error: unknown) => (error instanceof Error ? error.message : String(error)))
   if (check === 401 || check === 403) {
-    io.write("Capy rejected this key. Nothing was saved.\n")
+    io.write(typed === "" ? "Capy rejects the saved key. Run setup again and paste a new key.\n" : "Capy rejected this key. Nothing was saved.\n")
     return 1
+  }
+  if (typed === "") {
+    io.write(`Kept the saved key${process.env.CAPY_API_KEY?.trim() ? " (from CAPY_API_KEY)" : ""}.\n`)
+    const machine = await setupMachine(config, io.machine ?? nodeMachineIo(), io.write)
+    return machine.status === "failed" ? 1 : 0
   }
   await mkdir(dirname(config.apiKeyFile), { recursive: true, mode: 0o700 })
   await writeFile(config.apiKeyFile, `${key}\n`, { mode: 0o600 })

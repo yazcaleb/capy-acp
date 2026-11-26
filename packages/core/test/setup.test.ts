@@ -88,6 +88,22 @@ describe("capy-acp --setup", () => {
     expect([...rejected.started, ...empty.started]).toEqual([])
   })
 
+  it("keeps the saved key when the person presses Enter, and goes on to the device", async () => {
+    const s = setup("", async () => new Response("{}", { status: 200 }))
+    mkdirSync(join(s.keyFile, ".."), { recursive: true })
+    writeFileSync(s.keyFile, "capy_saved\n", { mode: 0o600 })
+    expect(await runSetup(s.config, s.io)).toBe(0)
+    expect(s.requests).toEqual([{ url: "https://capy.test/api/v1/projects", auth: "Bearer capy_saved" }])
+    expect(s.output.join("")).toContain("Kept the saved key.")
+    expect(s.output.join("")).toContain("Capy device on this computer: device_DOCK, from capy dock.")
+    const rejected = setup("", async () => new Response("{}", { status: 401 }))
+    mkdirSync(join(rejected.keyFile, ".."), { recursive: true })
+    writeFileSync(rejected.keyFile, "capy_old\n", { mode: 0o600 })
+    expect(await runSetup(rejected.config, rejected.io)).toBe(1)
+    expect(rejected.output.join("")).toContain("Capy rejects the saved key.")
+    expect(readFileSync(rejected.keyFile, "utf8")).toBe("capy_old\n")
+  })
+
   it("saves the key with a warning when Capy can't be reached", async () => {
     const s = setup("capy_offline", () => Promise.reject(new Error("getaddrinfo ENOTFOUND")))
     expect(await runSetup(s.config, s.io)).toBe(0)
