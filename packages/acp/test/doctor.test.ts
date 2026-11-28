@@ -116,7 +116,7 @@ describe("capy-acp --doctor", () => {
       node,
       bin: "C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\1a2b\\node_modules\\capy-acp\\dist\\bin.js"
     })
-    expect(fromNpx.text).toContain("in a pinned install (https://github.com/yazcaleb/capy-acp#install-without-npx)")
+    expect(fromNpx.text).toContain("in a pinned install (https://github.com/yazcaleb/capy-acp/tree/main/packages/acp#install-without-npx)")
     expect(fromNpx.text).not.toContain("_npx")
   })
 

@@ -23,7 +23,7 @@ const agentCommand = (launch: DoctorIo["launch"]) => {
   if (launch.platform !== "win32") return "add an agent with the command `npx` and the arguments `-y capy-acp`."
   // A copy that npx runs lives in its cache, which npm can clear at any time.
   const bin = /[\\/]_npx[\\/]/.test(launch.bin)
-    ? "the full path of `dist\\bin.js` in a pinned install (https://github.com/yazcaleb/capy-acp#install-without-npx)"
+    ? "the full path of `dist\\bin.js` in a pinned install (https://github.com/yazcaleb/capy-acp/tree/main/packages/acp#install-without-npx)"
     : `\`${launch.bin}\``
   return `add an agent with the command \`${launch.node}\` and the argument ${bin}. On Windows, T3 Code does not run \`npx\`.`
 }
@@ -75,7 +75,7 @@ export const runDoctor = async (config: AdapterConfig, folder: string, io: Docto
   io.write(
     problems === 0
       ? `\nReady. In your ACP client, ${agentCommand(io.launch)}\n` +
-          "Steps for each client: https://github.com/yazcaleb/capy-acp#setup\n"
+          "Steps for each client: https://github.com/yazcaleb/capy-acp/tree/main/packages/acp#setup\n"
       : `\n${problems === 1 ? "1 problem" : `${problems} problems`} to fix. Then run \`npx -y capy-acp --doctor\` again.\n`
   )
   return problems === 0 ? 0 : 1

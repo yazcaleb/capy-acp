@@ -24,7 +24,7 @@ Usage:
   npx -y capy-acp --version
   npx -y capy-acp --help
 
-Docs: https://github.com/yazcaleb/capy-acp#readme
+Docs: https://github.com/yazcaleb/capy-acp/tree/main/packages/acp#readme
 `
 
 const args = process.argv.slice(2)
