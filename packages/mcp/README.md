@@ -73,7 +73,7 @@ agent knows what to do next without guessing:
 
 A Capy device is a computer that runs the [Capy desktop app](https://docs.capy.ai/desktop) or the headless
 [`capy dock`](https://docs.capy.ai/dock). On a computer without one, `npx -y capy-mcp-server --setup` can install and
-pair `capy dock` for you. You approve the pairing on capy.ai once, as Capy designed it.
+pair `capy dock` for you. You approve the pairing on capy.ai once, then choose Yes in the terminal, as Capy designed it.
 
 The server never starts a cloud machine unless the call asks for `where: "cloud"`. Models run on your connected
 subscription or your Capy credits, as your Capy settings say. Without a `model`, Capy uses your account's default model.

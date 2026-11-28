@@ -230,6 +230,7 @@ describe("setupMachine", () => {
     )
     const text = m.output.join("")
     expect(text).toContain("curl -fsSL https://downloads.capy.ai/stable/dock/install.sh | sh\n")
+    expect(text).toContain("Choose Yes. It defaults to No.")
     expect(text).toContain("Never approve a code that someone sent you.")
     expect(text).toContain("Paired. Capy device: device_NEW.")
     expect(text).toContain("revoke the device at https://capy.ai/settings/devices")

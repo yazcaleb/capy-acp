@@ -69,7 +69,7 @@ message or in `AGENTS.md`, or change the Capy settings. The Capy docs say that C
 ## Setup
 
 Run `npx -y capy-acp --setup` in a terminal first. It saves the API key. On a computer without a Capy device, it then offers to
-install Capy's official `capy dock`, starts the pairing (you approve the code on capy.ai, in your browser), links the folder
+install Capy's official `capy dock`, starts the pairing (you approve the code on capy.ai, in your browser, then choose Yes in the terminal), links the folder
 that you run it in, and can install a user service that keeps the dock running. It asks before each step, and it ends
 with the device id. Pairing stays a step for a person, as Capy designed it.
 

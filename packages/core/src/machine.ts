@@ -325,7 +325,7 @@ const manualSteps = (os: DockOs, binary: string, root: string | undefined) =>
   [
     `To set it up yourself (${DOCS}):`,
     `  1. Install Capy's dock as the user that should run threads: ${installCommand(os).display}`,
-    `  2. Run \`${dockCommand(os, binary, []).display}\` in a terminal and approve the pairing on capy.ai.`,
+    `  2. Run \`${dockCommand(os, binary, []).display}\` in a terminal, approve the pairing on capy.ai, then choose Yes when capy dock asks to pair.`,
     root === undefined
       ? `  3. Stop it, and link your clones with \`${dockCommand(os, binary, ["dirs", "add", "<folder>"]).display}\`.`
       : `  3. Stop it, run \`${dockCommand(os, binary, ["dirs", "add", root]).display}\`, then start \`capy dock\` again and keep it running.`
@@ -510,6 +510,7 @@ export const setupMachine = async (config: AdapterConfig, io: MachineIo, write: 
     "\nNext, pair this computer with your Capy organization. capy dock shows a link, a QR code and a pairing code here.\n" +
       "  1. Open the link or scan the code, and sign in to Capy.\n" +
       "  2. Check the hostname and system, pick the organization, name the device, and approve it.\n" +
+      "  3. Back here, capy dock asks whether to pair with that organization. Choose Yes. It defaults to No.\n" +
       "Never approve a code that someone sent you. Press Ctrl+C to stop.\n\n"
   )
   const dock = io.start(dockCommand(os, binary, []))

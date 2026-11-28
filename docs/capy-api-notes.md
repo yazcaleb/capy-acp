@@ -251,7 +251,8 @@ tokens: { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }   (as /
 
 **Today.** The first `capy dock` run needs an interactive terminal. It shows a link, a QR code and a pairing code, and a
 person approves the code on capy.ai ("This code is on a machine I am setting up right now"). The docs say: "Never approve
-a code someone sent you." That design is right for a person at a laptop: it keeps a phished code from pairing an
+a code someone sent you." Since 0.9.2, the dock then asks in the terminal: "Continue only if you approved this code
+yourself. Pair this machine with <organization>?", and the default answer is No. That design is right for a person at a laptop: it keeps a phished code from pairing an
 attacker's machine. But it means no machine can become a device without a person present: a CI runner, a VM made from an
 image, or the cloud computer of a hosted agent. `capy-acp --setup` (and `capy-mcp-server --setup`, `capy-cli setup`)
 installs the dock with Capy's own installer, starts the pairing in the person's terminal, links the folder and installs a
@@ -373,12 +374,15 @@ these, and the tests cover them with a fake transport.
 - **Live checks:** `capy dock` 0.7.2 on macOS 26 arm64 and Windows Server 2022, 2026-11-24. The desktop app 0.6.0 on Linux
   and the dock on Windows, 2026-11-25.
 - **Clients:** T3 Code 0.1.12 and an ACP test client.
-- **Current releases:** desktop 0.10.0 (2026-11-24) and `capy dock` 0.9.2. They were not run. A static check of both builds
+- **Current releases:** desktop 0.10.0 (2026-11-24) was not run. A static check of its build and of `capy dock` 0.9.2
   shows that the device files above are unchanged.
 - **Re-check, 2026-11-25:** every claim in this file, against `openapi.json`, the docs pages and read-only API calls.
 - **MCP server and CLI, 2026-11-26:** Claude Code 2.1.330 calling capy-mcp-server's tools; the MCP server in an empty home
   folder with `CAPY_DEVICE_ID` (a remote device worktree); capy-cli in worktree mode; and one cloud thread on Particle-1 on
   a small machine. The desktop app 0.6.0 on Linux was the device.
+- **A fresh computer, 2026-11-28:** `capy-cli setup` in a new Debian container with no Capy files. It kept the key from
+  `CAPY_API_KEY`, ran Capy's installer (`capy dock` 0.9.2), paired after the approval on capy.ai and the Yes in the
+  terminal, and linked the clone. Then `capy-cli run` in that clone ran a thread in a worktree on the new device.
 
 How the adapter works around each gap (diffs, sessions, reconnects, cancel) is in [design.md](design.md). The test
 suite replays the recordings through a fake Capy client. If a change ships behind a flag, I can run it against the

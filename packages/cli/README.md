@@ -38,7 +38,7 @@ capy-cli is an independent project. Capy did not make it.
    ```
 
    On a computer without a Capy device, setup can also install and pair Capy's headless
-   [`capy dock`](https://docs.capy.ai/dock). You approve the pairing on capy.ai once.
+   [`capy dock`](https://docs.capy.ai/dock). You approve the pairing on capy.ai once, then choose Yes in the terminal.
 
 2. In a clone of a repository that is in a Capy project, run a task:
 
