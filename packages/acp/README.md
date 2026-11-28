@@ -160,8 +160,8 @@ first three.
 | macOS 26 arm64, Node 26 | `capy dock` 0.7.2 | ACP test client | Prompts, cancel, a dropped stream, a delivered file, a subagent |
 | Windows Server 2022 x64, Node 24 | `capy dock` 0.7.2 | ACP test client | The macOS checks, and diffs in linked mode and worktree mode |
 
-Cloud mode (`CAPY_ACP_WORKSPACE=cloud`) has unit tests only. The same cloud thread call ran live through capy-cli on
-2026-11-26.
+Cloud mode (`CAPY_ACP_WORKSPACE=cloud`) ran live on 2026-11-28, with the ACP test client on Linux and Particle-1: one prompt
+on a cloud machine of the project's size, to the end of the turn.
 
 CI runs the unit tests on Linux. The unit tests also pass on macOS and Windows. These cases had no test:
 
